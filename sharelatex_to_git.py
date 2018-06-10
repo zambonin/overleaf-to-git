@@ -32,7 +32,7 @@ def format_msg(authors, rev, stamps):
     return message
 
 
-def get_changes(_type):
+def get_changes(diff, _type):
     content = ""
     for d in diff:
         for t in "u" + _type:
@@ -58,27 +58,34 @@ with open(argv[1]) as h:
             diffs[key] = json.loads(r['response']['content']['text'])['diff']
 
     docs = {}
-    dates = []
     for upd in updates:
         names = [to_name(aut) for aut in upd['meta']['users']]
         key = "/{}/diff?from={}&to={}"
         author, email = names[0].rsplit(" ", 1)
         for k, v in upd['docs'].items():
-            diff = diffs[key.format(k, v['fromV'], v['toV'])]
-            if k not in docs.keys():
-                print("Hint: {}".format(diff[0]))
-                docs[k] = input("Real name of document {}: ".format(k))
-            commits.append({
-                'author': author,
-                'author_email': email[1:-1],
-                'author_date': to_date(upd['meta']['start_ts']),
-                'commit_date': to_date(upd['meta']['end_ts']),
-                'message': format_msg(names, docs[k], v),
-                'before': get_changes(diff, 'd'),
-                'after': get_changes(diff, 'i'),
-            })
+            try:
+                diff = diffs[key.format(k, v['fromV'], v['toV'])]
+                if k not in docs.keys():
+                    print("Hint: {}".format(diff[0]))
+                    docs[k] = input("Real name of document {}: ".format(k))
+                commits.append({
+                    'author': author,
+                    'author_email': email[1:-1],
+                    'author_date': to_date(upd['meta']['start_ts']),
+                    'commit_date': to_date(upd['meta']['end_ts']),
+                    'message': format_msg(names, docs[k], v),
+                    'before': get_changes(diff, 'd'),
+                    'after': get_changes(diff, 'i'),
+                })
+            except KeyError:
+                pass
 
-    # TODO initialize git repo inside new folder
+    commits = sorted(
+            [dict(t) for t in set([tuple(d.items()) for d in commits])],
+            key = lambda k: datetime.strptime(k['author_date'], "%c %z"),
+            reverse=True)
+
+    Popen("git init".split(), stdout=PIPE).communicate()
 
     first = commits[-1].copy()
     first['commit_date'] = first['author_date']
