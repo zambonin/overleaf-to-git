@@ -57,16 +57,28 @@ with open(argv[1]) as h:
             key = r['request']['url'].split('doc')[1]
             diffs[key] = json.loads(r['response']['content']['text'])['diff']
 
+    authors = {}
+    for upd in updates:
+        for aut in upd['meta']['users']:
+            if aut['id'] not in authors.keys():
+                if 'last_name' not in aut.keys():
+                    name = input("Author name for {}: ".format(
+                        aut['first_name'])).rsplit(" ", 1)
+                    aut['first_name'], aut['last_name'] = name
+                    aut['email'] = input("GitHub email for {}: ".format(
+                        aut['email']) or aut['email'])
+                authors[aut['id']] = aut
+
     docs = {}
     for upd in updates:
-        names = [to_name(aut) for aut in upd['meta']['users']]
+        names = [to_name(authors[aut['id']]) for aut in upd['meta']['users']]
         key = "/{}/diff?from={}&to={}"
         author, email = names[0].rsplit(" ", 1)
         for k, v in upd['docs'].items():
             try:
                 diff = diffs[key.format(k, v['fromV'], v['toV'])]
                 if k not in docs.keys():
-                    print("Hint: {}".format(diff[0]))
+                    print("Hint: {}".format(str(diff[0])[:40]))
                     docs[k] = input("Real name of document {}: ".format(k))
                 commits.append({
                     'author': author,
@@ -97,6 +109,8 @@ with open(argv[1]) as h:
         new_env['GIT_AUTHOR_NAME'] = commit['author']
         new_env['GIT_AUTHOR_EMAIL'] = commit['author_email']
         new_env['GIT_AUTHOR_DATE'] = commit['author_date']
+        new_env['GIT_COMMITTER_NAME'] = commit['author']
+        new_env['GIT_COMMITTER_EMAIL'] = commit['author_email']
         new_env['GIT_COMMITTER_DATE'] = commit['commit_date']
 
         filename = commit['message'].split()[2]
