@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 
-import json
 from datetime import datetime
+from json import load, loads
 from subprocess import Popen, PIPE
 from os import environ
 from sys import argv
@@ -27,7 +27,7 @@ def format_msg(authors, rev, stamps):
         desc += " to r{}".format(rev_after)
 
     message = "sharelatex: {}\n".format(desc)
-    message += "".join("\nCo-authored-by: {}\n".format(co) for co in authors[1:])
+    message += "".join("\nCo-authored-by: {}".format(co) for co in authors[1:])
 
     return message
 
@@ -44,7 +44,7 @@ def get_changes(diff, _type):
 
 
 with open(argv[1]) as h:
-    dh = json.load(h)['log']
+    dh = load(h)['log']
 
     updates = []
     diffs = {}
@@ -52,10 +52,10 @@ with open(argv[1]) as h:
 
     for r in dh['entries']:
         if 'updates' in r['request']['url']:
-            updates += json.loads(r['response']['content']['text'])['updates']
+            updates += loads(r['response']['content']['text'])['updates']
         if 'diff' in r['request']['url']:
             key = r['request']['url'].split('doc')[1]
-            diffs[key] = json.loads(r['response']['content']['text'])['diff']
+            diffs[key] = loads(r['response']['content']['text'])['diff']
 
     authors = {}
     for upd in updates:
