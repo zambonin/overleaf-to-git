@@ -17,16 +17,15 @@ def to_name(aut):
     return '{} {} <{}>'.format(aut['first_name'], aut['last_name'], aut['email'])
 
 
-def format_msg(authors, rev, stamps):
-    rev_before, rev_after = stamps['fromV'], stamps['toV']
+def format_msg(authors, rev, before, after):
     desc = "update {}".format(rev)
 
-    if rev_before != rev_after:
-        desc += " from r{} to r{}".format(rev_before, rev_after)
+    if before != after:
+        desc += " from r{} to r{}".format(before, after)
     else:
-        desc += " to r{}".format(rev_after)
+        desc += " to r{}".format(after)
 
-    message = "sharelatex: {}\n".format(desc)
+    message = "overleaf: {}\n".format(desc)
     message += "".join("\nCo-authored-by: {}".format(co) for co in authors[1:])
 
     return message
@@ -53,39 +52,35 @@ with open(argv[1]) as h:
     for r in dh['entries']:
         if 'updates' in r['request']['url']:
             updates += loads(r['response']['content']['text'])['updates']
-        if 'diff' in r['request']['url']:
-            key = r['request']['url'].split('doc')[1]
+        if 'path' in r['request']['url']:
+            key = r['request']['url'].split('?')[1]
             diffs[key] = loads(r['response']['content']['text'])['diff']
 
     authors = {}
     for upd in updates:
         for aut in upd['meta']['users']:
             if aut['id'] not in authors.keys():
-                if 'last_name' not in aut.keys():
+                if not aut['last_name']:
                     name = input("Author name for {}: ".format(
                         aut['first_name'])).rsplit(" ", 1)
                     aut['first_name'], aut['last_name'] = name
                     aut['email'] = input("GitHub email for {}: ".format(
-                        aut['email']) or aut['email'])
+                        aut['email'])) or aut['email']
                 authors[aut['id']] = aut
 
-    docs = {}
     for upd in updates:
         names = [to_name(authors[aut['id']]) for aut in upd['meta']['users']]
-        key = "/{}/diff?from={}&to={}"
+        key = "pathname={}&from={}&to={}"
         author, email = names[0].rsplit(" ", 1)
-        for k, v in upd['docs'].items():
+        for path in upd['pathnames']:
             try:
-                diff = diffs[key.format(k, v['fromV'], v['toV'])]
-                if k not in docs.keys():
-                    print("Hint: {}".format(str(diff[0])[:40]))
-                    docs[k] = input("Real name of document {}: ".format(k))
+                diff = diffs[key.format(path, upd['toV'], upd['toV'])]
                 commits.append({
                     'author': author,
                     'author_email': email[1:-1],
                     'author_date': to_date(upd['meta']['start_ts']),
                     'commit_date': to_date(upd['meta']['end_ts']),
-                    'message': format_msg(names, docs[k], v),
+                    'message': format_msg(names, path, upd['fromV'], upd['toV']),
                     'before': get_changes(diff, 'd'),
                     'after': get_changes(diff, 'i'),
                 })
@@ -102,7 +97,6 @@ with open(argv[1]) as h:
     first = commits[-1].copy()
     first['commit_date'] = first['author_date']
     first['after'] = first.pop('before')
-    first['message'] = first['message'].rsplit(" ", 2)[0].replace("from", "to")
 
     new_env = environ.copy()
     for commit in [first] + commits[::-1]:
