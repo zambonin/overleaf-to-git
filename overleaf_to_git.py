@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
+# pylint: disable=C0103,C0111
 
 from datetime import datetime
 from json import load, loads
@@ -13,11 +13,12 @@ def to_date(stamp):
     return datetime.fromtimestamp(stamp / 1000).astimezone().strftime("%c %z")
 
 
-def to_name(aut):
-    return '{} {} <{}>'.format(aut['first_name'], aut['last_name'], aut['email'])
+def to_name(aut_dict):
+    return '{} {} <{}>'.format(aut_dict['first_name'], aut_dict['last_name'],
+                               aut_dict['email'])
 
 
-def format_msg(authors, rev, before, after):
+def format_msg(auts, rev, before, after):
     desc = "update {}".format(rev)
 
     if before != after:
@@ -26,14 +27,14 @@ def format_msg(authors, rev, before, after):
         desc += " to r{}".format(after)
 
     message = "overleaf: {}\n".format(desc)
-    message += "".join("\nCo-authored-by: {}".format(co) for co in authors[1:])
+    message += "".join("\nCo-authored-by: {}".format(co) for co in auts[1:])
 
     return message
 
 
-def get_changes(diff, _type):
+def get_changes(patch, _type):
     content = ""
-    for d in diff:
+    for d in patch:
         for t in "u" + _type:
             try:
                 content += d[t]
@@ -88,9 +89,9 @@ with open(argv[1]) as h:
                 pass
 
     commits = sorted(
-            [dict(t) for t in set([tuple(d.items()) for d in commits])],
-            key = lambda k: datetime.strptime(k['author_date'], "%c %z"),
-            reverse=True)
+        [dict(t) for t in {tuple(d.items()) for d in commits}],
+        key=lambda k: datetime.strptime(k['author_date'], "%c %z"),
+        reverse=True)
 
     Popen("git init".split(), stdout=PIPE).communicate()
 
