@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=C0103,C0111
+# pylint: disable=C0103,C0111,W1632
 
+from __future__ import absolute_import, division
 from datetime import datetime
 from json import load, loads
 from subprocess import Popen, PIPE
@@ -61,7 +62,7 @@ with open(argv[1]) as h:
     authors = {}
     for upd in updates:
         for aut in upd["meta"]["users"]:
-            if aut["id"] not in authors.keys():
+            if aut["id"] not in list(authors.keys()):
                 if not aut["last_name"]:
                     name = input(
                         "Author name for {}: ".format(aut["first_name"])
