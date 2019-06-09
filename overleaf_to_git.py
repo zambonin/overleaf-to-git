@@ -1,129 +1,217 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=C0103,C0111,W1632
+# pylint: disable=C0330, W0632
 
 from __future__ import absolute_import, division
+
+from collections import namedtuple
 from datetime import datetime
-from json import load, loads
+from os import chdir, environ, remove
+from os.path import dirname
+from json.decoder import JSONDecodeError
+from pathlib import Path
 from subprocess import Popen, PIPE
-from os import environ
 from sys import argv
+from typing import Dict, List, Union
+
+from requests import get as rget
+
+CommitHeader = namedtuple(
+    "CommitHeader", ["author", "author_date", "commit_date", "message"]
+)
 
 
-def to_date(stamp):
-    return datetime.fromtimestamp(stamp / 1000).astimezone().strftime("%c %z")
+def get_update_dict(
+    project_id: str, headers: Dict[str, str], count: int = 1 << 20
+) -> Dict[str, str]:
+    return rget(
+        "https://www.overleaf.com/project/{}/updates".format(project_id),
+        params={"min_count": count},
+        headers=headers,
+    ).json()
 
 
-def to_name(aut_dict):
-    return "{} {} <{}>".format(
-        aut_dict["first_name"], aut_dict["last_name"], aut_dict["email"]
-    )
+def get_diff_dict(
+    project_id: str, headers: Dict[str, str], _file: str, _from: str, _to: str
+) -> Union[None, str]:
+    diff_url = "https://www.overleaf.com/project/{}/diff".format(project_id)
 
+    try:
+        # if there are multiple add/remove operations within a single
+        # diff range, Overleaf shows an older version of the file,
+        # and due to this fact `toV` is used twice to guarantee that
+        # the latest version is obtained (but it may fail anyway)
+        diff = rget(
+            diff_url,
+            params={"pathname": _file, "from": _to, "to": _to},
+            headers=headers,
+        ).json()
+    except JSONDecodeError:
+        diff = rget(
+            diff_url,
+            params={"pathname": _file, "from": _from, "to": _to},
+            headers=headers,
+        ).json()
 
-def format_msg(auts, rev, before, after):
-    desc = "update {}".format(rev)
-
-    if before != after:
-        desc += " from r{} to r{}".format(before, after)
-    else:
-        desc += " to r{}".format(after)
-
-    message = "overleaf: {}\n".format(desc)
-    message += "".join("\nCo-authored-by: {}".format(co) for co in auts[1:])
-
-    return message
-
-
-def get_changes(patch, _type):
     content = ""
-    for d in patch:
-        for t in "u" + _type:
-            try:
-                content += d[t]
-            except KeyError:
-                pass
+    for mod in diff["diff"]:
+        if mod == "binary":
+            content = None
+            continue
+        if "u" in mod.keys():
+            content += mod["u"]
+        if "i" in mod.keys():
+            content += mod["i"]
+
     return content
 
 
-with open(argv[1]) as h:
-    dh = load(h)["log"]
+def make_commit_header(
+    upd_meta_info: Dict[str, Union[List[Dict[str, str]], int]],
+    files: List[str],
+    _from: str,
+    _to: str,
+) -> CommitHeader:
+    def parse_author(upd_first_user: Dict[str, str]) -> str:
+        return "{} {} <{}>".format(
+            upd_first_user["first_name"],
+            upd_first_user["last_name"],
+            upd_first_user["email"],
+        )
 
-    updates = []
-    diffs = {}
-    commits = []
+    def parse_date(timestamp: int) -> str:
+        return (
+            datetime.fromtimestamp(timestamp / 1000)
+            .astimezone()
+            .strftime("%c %z")
+        )
 
-    for r in dh["entries"]:
-        if "updates" in r["request"]["url"]:
-            updates += loads(r["response"]["content"]["text"])["updates"]
-        if "path" in r["request"]["url"]:
-            key = r["request"]["url"].split("?")[1]
-            diffs[key] = loads(r["response"]["content"]["text"])["diff"]
+    def parse_message(
+        upd_users: List[Dict[str, str]],
+        _files: List[str],
+        _from: str,
+        _to: str,
+    ) -> str:
+        _path = _files[0] if len(_files) == 1 else "multiple files"
+        message = "overleaf: update {} from r{} to r{}".format(
+            _path, _from, _to
+        )
 
-    authors = {}
-    for upd in updates:
-        for aut in upd["meta"]["users"]:
-            if aut["id"] not in list(authors.keys()):
-                if not aut["last_name"]:
-                    name = input(
-                        "Author name for {}: ".format(aut["first_name"])
-                    ).rsplit(" ", 1)
-                    aut["first_name"], aut["last_name"] = name
-                    aut["email"] = (
-                        input("GitHub email for {}: ".format(aut["email"]))
-                        or aut["email"]
-                    )
-                authors[aut["id"]] = aut
+        if _files[1:]:
+            message += "\n* "
+            message += ", ".join(files)
 
-    for upd in updates:
-        names = [to_name(authors[aut["id"]]) for aut in upd["meta"]["users"]]
-        key = "pathname={}&from={}&to={}"
-        author, email = names[0].rsplit(" ", 1)
-        for path in upd["pathnames"]:
-            try:
-                diff = diffs[key.format(path, upd["toV"], upd["toV"])]
-                commits.append(
-                    {
-                        "author": author,
-                        "author_email": email[1:-1],
-                        "author_date": to_date(upd["meta"]["start_ts"]),
-                        "commit_date": to_date(upd["meta"]["end_ts"]),
-                        "message": format_msg(
-                            names, path, upd["fromV"], upd["toV"]
-                        ),
-                        "before": get_changes(diff, "d"),
-                        "after": get_changes(diff, "i"),
-                    }
-                )
-            except KeyError:
-                pass
+        if upd_users[1:]:
+            message += "\n"
+            message += "".join(
+                "\nCo-authored-by: {}".format(parse_author(coauthor))
+                for coauthor in upd_users[1:]
+            )
 
-    commits = sorted(
-        [dict(t) for t in {tuple(d.items()) for d in commits}],
-        key=lambda k: datetime.strptime(k["author_date"], "%c %z"),
-        reverse=True,
+        return message + "\n"
+
+    return CommitHeader(
+        author=parse_author(upd_meta_info["users"][0]),
+        author_date=parse_date(upd_meta_info["start_ts"]),
+        commit_date=parse_date(upd_meta_info["end_ts"]),
+        message=parse_message(upd_meta_info["users"], files, _from, _to),
     )
 
+
+def create_cur_dir_contents(
+    project_id: str, headers: Dict[str, str], upd: Dict[str, str]
+) -> Dict[str, str]:
+    cur_dir_contents = {}
+
+    for _file in upd["pathnames"]:
+        cur_dir_contents[_file] = get_diff_dict(
+            project_id, headers, _file, upd["fromV"], upd["toV"]
+        )
+
+    for operation in reversed(upd["project_ops"]):
+        if "add" in operation.keys():
+            _path = operation["add"]["pathname"]
+            cur_dir_contents[_path] = get_diff_dict(
+                project_id, headers, _path, upd["fromV"], upd["toV"]
+            )
+        elif "rename" in operation.keys():
+            old_path = operation["rename"]["pathname"]
+            if old_path in cur_dir_contents.keys():
+                cur_dir_contents[
+                    operation["rename"]["newPathname"]
+                ] = cur_dir_contents[operation["rename"]["pathname"]]
+                cur_dir_contents[operation["rename"]["pathname"]] = None
+        elif "remove" in operation.keys():
+            cur_dir_contents[operation["remove"]["pathname"]] = None
+
+    return cur_dir_contents
+
+
+def create_commit(cur_dir_contents: Dict[str, str], upd: Dict[str, str]):
+    removed_files = (
+        _path for _path, diff in cur_dir_contents.items() if diff is None
+    )
+    for _path in removed_files:
+        try:
+            remove(_path)
+        except FileNotFoundError:
+            pass
+
+    touched_files = [_path for _path, diff in cur_dir_contents.items() if diff]
+
+    commit_header = make_commit_header(
+        upd["meta"], touched_files, upd["fromV"], upd["toV"]
+    )
+    commit_line = (
+        "git",
+        "commit",
+        "--date={}".format(commit_header.author_date),
+        "--author={}".format(commit_header.author),
+        "--message={}".format(commit_header.message),
+    )
+
+    for _path in touched_files:
+        Path(dirname(_path)).mkdir(parents=True, exist_ok=True)
+        with open(_path, "w") as file_handler:
+            file_handler.write(cur_dir_contents[_path])
+
+    Popen("git add .".split(), stdout=PIPE).communicate()
+    env = environ.copy()
+    env["GIT_COMMITTER_DATE"] = commit_header.commit_date
+    Popen(commit_line, stdout=PIPE, env=env).communicate()
+
+
+def main():
+    assert len(argv) == 3, "Please input parameters correctly."
+    _, project_id, req_head_path = argv
+
+    with open(req_head_path, "r") as head:
+        data = [header.strip("\n").split(": ") for header in head.readlines()]
+        headers = {field.lower(): content for field, content in data}
+
+    print("Getting list of updates...", end="\r")
+    updates = get_update_dict(project_id, headers)["updates"]
+
+    Path(project_id).mkdir(exist_ok=True)
+    chdir(project_id)
     Popen("git init".split(), stdout=PIPE).communicate()
 
-    first = commits[-1].copy()
-    first["commit_date"] = first["author_date"]
-    first["after"] = first.pop("before")
+    num_commits, bar_width = len(updates), 70
 
-    new_env = environ.copy()
-    for commit in [first] + commits[::-1]:
-        new_env["GIT_AUTHOR_NAME"] = commit["author"]
-        new_env["GIT_AUTHOR_EMAIL"] = commit["author_email"]
-        new_env["GIT_AUTHOR_DATE"] = commit["author_date"]
-        new_env["GIT_COMMITTER_NAME"] = commit["author"]
-        new_env["GIT_COMMITTER_EMAIL"] = commit["author_email"]
-        new_env["GIT_COMMITTER_DATE"] = commit["commit_date"]
+    for index, upd in enumerate(reversed(updates)):
+        if index < 452:
+            continue
+        cur_dir_contents = create_cur_dir_contents(project_id, headers, upd)
+        create_commit(cur_dir_contents, upd)
 
-        filename = commit["message"].split()[2]
-        with open(filename, "w") as f:
-            f.write(commit["after"])
+        percent = (index + 1) / num_commits
+        bars = int(percent * bar_width) * "█"
+        print("{:>7.2%} [{:<70}]".format(percent, bars), end="\r")
 
-        add_cmd = f"git add {filename}"
-        commit_cmd = f"git  commit  --message  {commit['message']}"
+    print(
+        "{} commits created.".format(num_commits), end=" " * bar_width + "\n"
+    )
 
-        Popen(add_cmd.split(), stdout=PIPE).communicate()
-        Popen(commit_cmd.split("  "), stdout=PIPE, env=new_env).communicate()
+
+if __name__ == "__main__":
+    main()
