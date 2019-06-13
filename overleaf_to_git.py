@@ -31,7 +31,7 @@ def get_update_dict(
     ).json()
 
 
-def get_diff_dict(
+def get_diff_dict_v2(
     project_id: str, headers: Dict[str, str], _file: str, _from: str, _to: str
 ) -> Union[None, str]:
     diff_url = "https://www.overleaf.com/project/{}/diff".format(project_id)
@@ -58,6 +58,34 @@ def get_diff_dict(
         if mod == "binary":
             content = None
             continue
+        if "u" in mod.keys():
+            content += mod["u"]
+        if "i" in mod.keys():
+            content += mod["i"]
+
+    return content
+
+
+def get_diff_dict_v1(
+    project_id: str,
+    headers: Dict[str, str],
+    file_id: str,
+    _from: str,
+    _to: str,
+) -> Union[None, str]:
+    diff_url = "https://www.overleaf.com/project/{}/doc/{}/diff".format(
+        project_id, file_id
+    )
+    try:
+        # 500 error due to deleted file
+        diff = rget(
+            diff_url, params={"from": _from, "to": _to}, headers=headers
+        ).json()
+    except JSONDecodeError:
+        return None
+
+    content = ""
+    for mod in diff["diff"]:
         if "u" in mod.keys():
             content += mod["u"]
         if "i" in mod.keys():
@@ -118,13 +146,27 @@ def make_commit_header(
     )
 
 
-def create_cur_dir_contents(
+def create_cur_dir_contents_v1(
+    project_id: str,
+    headers: Dict[str, str],
+    upd: Dict[str, str],
+) -> Dict[str, str]:
+
+    return {
+        file_id: get_diff_dict_v1(
+            project_id, headers, file_id, rev["fromV"], rev["toV"]
+        )
+        for file_id, rev in upd["docs"].items()
+    }
+
+
+def create_cur_dir_contents_v2(
     project_id: str, headers: Dict[str, str], upd: Dict[str, str]
 ) -> Dict[str, str]:
     cur_dir_contents = {}
 
     for _file in upd["pathnames"]:
-        cur_dir_contents[_file] = get_diff_dict(
+        cur_dir_contents[_file] = get_diff_dict_v2(
             project_id, headers, _file, upd["fromV"], upd["toV"]
         )
 
@@ -147,7 +189,56 @@ def create_cur_dir_contents(
     return cur_dir_contents
 
 
-def create_commit(cur_dir_contents: Dict[str, str], upd: Dict[str, str]):
+def create_cur_dir_contents(
+    project_id: str, headers: Dict[str, str], upd: Dict[str, str]
+) -> Dict[str, str]:
+    return (
+        create_cur_dir_contents_v2(project_id, headers, upd)
+        if "pathnames" in upd.keys()
+        else create_cur_dir_contents_v1(project_id, headers, upd)
+    )
+
+
+def create_commit_v1(
+    cur_dir_contents: Dict[str, str],
+    upd: Dict[str, str],
+    real_file_names: Dict[str, str],
+):
+    hint_length = 40
+    for _path, diff in cur_dir_contents.items():
+        if diff is None:
+            continue
+        if _path not in real_file_names.keys():
+            print("\nHint: {}".format(diff[:hint_length]))
+            real_file_names[_path] = input(
+                "Real name of document {}: ".format(_path)
+            )
+        real_path = real_file_names[_path]
+        commit_header = make_commit_header(
+            upd["meta"],
+            [real_path],
+            upd["docs"][_path]["fromV"],
+            upd["docs"][_path]["toV"],
+        )
+        commit_line = (
+            "git",
+            "commit",
+            "--date={}".format(commit_header.author_date),
+            "--author={}".format(commit_header.author),
+            "--message={}".format(commit_header.message),
+        )
+
+        Path(dirname(real_path)).mkdir(parents=True, exist_ok=True)
+        with open(real_path, "w") as file_handler:
+            file_handler.write(diff)
+
+        Popen("git add .".split(), stdout=PIPE).communicate()
+        env = environ.copy()
+        env["GIT_COMMITTER_DATE"] = commit_header.commit_date
+        Popen(commit_line, stdout=PIPE, env=env).communicate()
+
+
+def create_commit_v2(cur_dir_contents: Dict[str, str], upd: Dict[str, str]):
     removed_files = (
         _path for _path, diff in cur_dir_contents.items() if diff is None
     )
@@ -181,6 +272,17 @@ def create_commit(cur_dir_contents: Dict[str, str], upd: Dict[str, str]):
     Popen(commit_line, stdout=PIPE, env=env).communicate()
 
 
+def create_commit(
+    cur_dir_contents: Dict[str, str],
+    upd: Dict[str, str],
+    real_file_names: Dict[str, str],
+):
+    if "pathname" in upd.keys():
+        create_commit_v2(cur_dir_contents, upd)
+    else:
+        create_commit_v1(cur_dir_contents, upd, real_file_names)
+
+
 def main():
     assert len(argv) == 3, "Please input parameters correctly."
     _, project_id, req_head_path = argv
@@ -198,18 +300,17 @@ def main():
 
     num_commits, bar_width = len(updates), 70
 
+    real_file_names = {}
     for index, upd in enumerate(reversed(updates)):
-        if index < 452:
-            continue
         cur_dir_contents = create_cur_dir_contents(project_id, headers, upd)
-        create_commit(cur_dir_contents, upd)
+        create_commit(cur_dir_contents, upd, real_file_names)
 
         percent = (index + 1) / num_commits
         bars = int(percent * bar_width) * "█"
         print("{:>7.2%} [{:<70}]".format(percent, bars), end="\r")
 
     print(
-        "{} commits created.".format(num_commits), end=" " * bar_width + "\n"
+        "{} revisions parsed.".format(num_commits), end=" " * bar_width + "\n"
     )
 
 
