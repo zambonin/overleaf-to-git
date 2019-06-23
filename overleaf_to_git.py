@@ -95,7 +95,7 @@ def get_diff_dict_v1(
 
 
 def make_commit_header(
-    upd_meta_info: Dict[str, Union[List[Dict[str, str]], int]],
+    upd_meta_info: Dict[str, Union[List[Dict[str, str]], int, int]],
     files: List[str],
     _from: str,
     _to: str,
@@ -173,7 +173,7 @@ def create_cur_dir_contents_v2(
     for operation in reversed(upd["project_ops"]):
         if "add" in operation.keys():
             _path = operation["add"]["pathname"]
-            cur_dir_contents[_path] = get_diff_dict(
+            cur_dir_contents[_path] = get_diff_dict_v2(
                 project_id, headers, _path, upd["fromV"], upd["toV"]
             )
         elif "rename" in operation.keys():
@@ -277,7 +277,7 @@ def create_commit(
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
 ):
-    if "pathname" in upd.keys():
+    if "pathnames" in upd.keys():
         create_commit_v2(cur_dir_contents, upd)
     else:
         create_commit_v1(cur_dir_contents, upd, real_file_names)
