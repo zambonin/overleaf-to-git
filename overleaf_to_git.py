@@ -6,7 +6,7 @@ from __future__ import absolute_import, division
 
 from collections import namedtuple
 from datetime import datetime
-from os import chdir, environ, remove
+from os import chdir, environ, remove, rename
 from os.path import dirname
 from json.decoder import JSONDecodeError
 from pathlib import Path
@@ -95,16 +95,13 @@ def get_diff_dict_v1(
 
 
 def make_commit_header(
-    upd_meta_info: Dict[str, Union[List[Dict[str, str]], int, int]],
-    files: List[str],
-    _from: str,
-    _to: str,
+    upd_meta_info: Dict, _from: str, _to: str, files: List[str]
 ) -> CommitHeader:
-    def parse_author(upd_first_user: Dict[str, str]) -> str:
+    def parse_author(first_author: Dict[str, str]) -> str:
         return "{} {} <{}>".format(
-            upd_first_user["first_name"],
-            upd_first_user["last_name"],
-            upd_first_user["email"],
+            first_author["first_name"],
+            first_author.get("last_name", ""),
+            first_author["email"],
         )
 
     def parse_date(timestamp: int) -> str:
@@ -115,10 +112,7 @@ def make_commit_header(
         )
 
     def parse_message(
-        upd_users: List[Dict[str, str]],
-        _files: List[str],
-        _from: str,
-        _to: str,
+        authors: List[Dict[str, str]], _files: List[str], _from: str, _to: str
     ) -> str:
         _path = _files[0] if len(_files) == 1 else "multiple files"
         message = "overleaf: update {} from r{} to r{}".format(
@@ -127,132 +121,64 @@ def make_commit_header(
 
         if _files[1:]:
             message += "\n* "
-            message += ", ".join(files)
+            message += ", ".join(_files)
 
-        if upd_users[1:]:
+        if authors[1:]:
             message += "\n"
             message += "".join(
                 "\nCo-authored-by: {}".format(parse_author(coauthor))
-                for coauthor in upd_users[1:]
+                for coauthor in authors[1:]
             )
 
         return message + "\n"
 
+    users = upd_meta_info["users"]
     return CommitHeader(
-        author=parse_author(upd_meta_info["users"][0]),
+        author=parse_author(users[0]),
         author_date=parse_date(upd_meta_info["start_ts"]),
         commit_date=parse_date(upd_meta_info["end_ts"]),
-        message=parse_message(upd_meta_info["users"], files, _from, _to),
-    )
-
-
-def create_cur_dir_contents_v1(
-    project_id: str,
-    headers: Dict[str, str],
-    upd: Dict[str, str],
-) -> Dict[str, str]:
-
-    return {
-        file_id: get_diff_dict_v1(
-            project_id, headers, file_id, rev["fromV"], rev["toV"]
-        )
-        for file_id, rev in upd["docs"].items()
-    }
-
-
-def create_cur_dir_contents_v2(
-    project_id: str, headers: Dict[str, str], upd: Dict[str, str]
-) -> Dict[str, str]:
-    cur_dir_contents = {}
-
-    for _file in upd["pathnames"]:
-        cur_dir_contents[_file] = get_diff_dict_v2(
-            project_id, headers, _file, upd["fromV"], upd["toV"]
-        )
-
-    for operation in reversed(upd["project_ops"]):
-        if "add" in operation.keys():
-            _path = operation["add"]["pathname"]
-            cur_dir_contents[_path] = get_diff_dict_v2(
-                project_id, headers, _path, upd["fromV"], upd["toV"]
-            )
-        elif "rename" in operation.keys():
-            old_path = operation["rename"]["pathname"]
-            if old_path in cur_dir_contents.keys():
-                cur_dir_contents[
-                    operation["rename"]["newPathname"]
-                ] = cur_dir_contents[operation["rename"]["pathname"]]
-                cur_dir_contents[operation["rename"]["pathname"]] = None
-        elif "remove" in operation.keys():
-            cur_dir_contents[operation["remove"]["pathname"]] = None
-
-    return cur_dir_contents
-
-
-def create_cur_dir_contents(
-    project_id: str, headers: Dict[str, str], upd: Dict[str, str]
-) -> Dict[str, str]:
-    return (
-        create_cur_dir_contents_v2(project_id, headers, upd)
-        if "pathnames" in upd.keys()
-        else create_cur_dir_contents_v1(project_id, headers, upd)
+        message=parse_message(users, files, _from, _to),
     )
 
 
 def create_commit_v1(
-    cur_dir_contents: Dict[str, str],
+    project_id: str,
+    headers: Dict[str, str],
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
 ):
     hint_length = 40
-    for _path, diff in cur_dir_contents.items():
+    for file_id, rev in upd["docs"].items():
+        diff = get_diff_dict_v1(
+            project_id, headers, file_id, rev["fromV"], rev["toV"]
+        )
         if diff is None:
             continue
-        if _path not in real_file_names.keys():
+
+        if file_id not in real_file_names.keys():
             print("\nHint: {}".format(diff[:hint_length]))
-            real_file_names[_path] = input(
-                "Real name of document {}: ".format(_path)
+            real_file_names[file_id] = input(
+                "Real name of document {}: ".format(file_id)
             )
-        real_path = real_file_names[_path]
-        commit_header = make_commit_header(
+        real_path = real_file_names[file_id]
+        write_file(diff, real_path)
+
+        do_commit(
             upd["meta"],
+            upd["docs"][file_id]["fromV"],
+            upd["docs"][file_id]["toV"],
             [real_path],
-            upd["docs"][_path]["fromV"],
-            upd["docs"][_path]["toV"],
-        )
-        commit_line = (
-            "git",
-            "commit",
-            "--date={}".format(commit_header.author_date),
-            "--author={}".format(commit_header.author),
-            "--message={}".format(commit_header.message),
         )
 
-        Path(dirname(real_path)).mkdir(parents=True, exist_ok=True)
-        with open(real_path, "w") as file_handler:
-            file_handler.write(diff)
 
-        Popen("git add .".split(), stdout=PIPE).communicate()
-        env = environ.copy()
-        env["GIT_COMMITTER_DATE"] = commit_header.commit_date
-        Popen(commit_line, stdout=PIPE, env=env).communicate()
+def write_file(contents: Union[None, str], _path: str):
+    Path(dirname(_path)).mkdir(parents=True, exist_ok=True)
+    with open(_path, "w") as file_handler:
+        file_handler.write(contents)
 
 
-def create_commit_v2(cur_dir_contents: Dict[str, str], upd: Dict[str, str]):
-    removed_files = (
-        _path for _path, diff in cur_dir_contents.items() if diff is None
-    )
-    for _path in removed_files:
-        try:
-            remove(_path)
-        except FileNotFoundError:
-            pass
-
-    touched_files = [_path for _path, diff in cur_dir_contents.items() if diff]
-
-    commit_header = make_commit_header(
-        upd["meta"], touched_files, upd["fromV"], upd["toV"]
-    )
+def do_commit(upd_meta_info: Dict, _from: str, _to: str, files: List[str]):
+    commit_header = make_commit_header(upd_meta_info, _from, _to, files)
     commit_line = (
         "git",
         "commit",
@@ -261,26 +187,52 @@ def create_commit_v2(cur_dir_contents: Dict[str, str], upd: Dict[str, str]):
         "--message={}".format(commit_header.message),
     )
 
-    for _path in touched_files:
-        Path(dirname(_path)).mkdir(parents=True, exist_ok=True)
-        with open(_path, "w") as file_handler:
-            file_handler.write(cur_dir_contents[_path])
-
     Popen("git add .".split(), stdout=PIPE).communicate()
     env = environ.copy()
     env["GIT_COMMITTER_DATE"] = commit_header.commit_date
     Popen(commit_line, stdout=PIPE, env=env).communicate()
 
 
+def create_commit_v2(
+    project_id: str, headers: Dict[str, str], upd: Dict[str, str]
+):
+    touched_files = []
+    for _path in upd["pathnames"]:
+        diff = get_diff_dict_v2(
+            project_id, headers, _path, upd["fromV"], upd["toV"]
+        )
+        write_file(diff, _path)
+        touched_files.append(_path)
+
+    for operation in reversed(upd["project_ops"]):
+        _path = None
+        if "add" in operation.keys():
+            _path = operation["add"]["pathname"]
+            diff = get_diff_dict_v2(
+                project_id, headers, _path, upd["fromV"], upd["toV"]
+            )
+            write_file(diff, _path)
+        elif "rename" in operation.keys():
+            _path = operation["rename"]["newPathname"]
+            rename(operation["rename"]["pathname"], _path)
+        elif "remove" in operation.keys():
+            _path = operation["remove"]["pathname"]
+            remove(_path)
+        touched_files.append(_path)
+
+    do_commit(upd["meta"], upd["fromV"], upd["toV"], touched_files)
+
+
 def create_commit(
-    cur_dir_contents: Dict[str, str],
+    project_id: str,
+    headers: Dict[str, str],
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
 ):
     if "pathnames" in upd.keys():
-        create_commit_v2(cur_dir_contents, upd)
+        create_commit_v2(project_id, headers, upd)
     else:
-        create_commit_v1(cur_dir_contents, upd, real_file_names)
+        create_commit_v1(project_id, headers, upd, real_file_names)
 
 
 def main():
@@ -299,12 +251,9 @@ def main():
     Popen("git init".split(), stdout=PIPE).communicate()
 
     num_commits, bar_width = len(updates), 70
-
     real_file_names = {}
     for index, upd in enumerate(reversed(updates)):
-        cur_dir_contents = create_cur_dir_contents(project_id, headers, upd)
-        create_commit(cur_dir_contents, upd, real_file_names)
-
+        create_commit(project_id, headers, upd, real_file_names)
         percent = (index + 1) / num_commits
         bars = int(percent * bar_width) * "█"
         print("{:>7.2%} [{:<70}]".format(percent, bars), end="\r")
