@@ -6,15 +6,17 @@ from __future__ import absolute_import, division
 
 from collections import namedtuple
 from datetime import datetime
+from getpass import getpass
+from json import loads
+from json.decoder import JSONDecodeError
+from operator import itemgetter
 from os import chdir, environ, remove, rename
 from os.path import dirname
-from json.decoder import JSONDecodeError
 from pathlib import Path
 from subprocess import Popen, PIPE
-from sys import argv
 from typing import Dict, List, Union
 
-from requests import get as rget
+from robobrowser import RoboBrowser
 
 CommitHeader = namedtuple(
     "CommitHeader", ["author", "author_date", "commit_date", "message"]
@@ -22,36 +24,33 @@ CommitHeader = namedtuple(
 
 
 def get_update_dict(
-    project_id: str, headers: Dict[str, str], count: int = 1 << 20
+    project_id: str, browser, count: int = 1 << 20
 ) -> Dict[str, str]:
-    return rget(
+    browser.open(
         "https://www.overleaf.com/project/{}/updates".format(project_id),
         params={"min_count": count},
-        headers=headers,
-    ).json()
+    )
+    return loads(browser.parsed.text)
 
 
 def get_diff_dict_v2(
-    project_id: str, headers: Dict[str, str], _file: str, _from: str, _to: str
+    project_id: str, browser, _file: str, _from: str, _to: str
 ) -> Union[None, str]:
     diff_url = "https://www.overleaf.com/project/{}/diff".format(project_id)
-
     try:
         # if there are multiple add/remove operations within a single
         # diff range, Overleaf shows an older version of the file,
         # and due to this fact `toV` is used twice to guarantee that
         # the latest version is obtained (but it may fail anyway)
-        diff = rget(
-            diff_url,
-            params={"pathname": _file, "from": _to, "to": _to},
-            headers=headers,
-        ).json()
+        browser.open(
+            diff_url, params={"pathname": _file, "from": _to, "to": _to}
+        )
+        diff = loads(browser.parsed.text)
     except JSONDecodeError:
-        diff = rget(
-            diff_url,
-            params={"pathname": _file, "from": _from, "to": _to},
-            headers=headers,
-        ).json()
+        browser.open(
+            diff_url, params={"pathname": _file, "from": _from, "to": _to}
+        )
+        diff = loads(browser.parsed.text)
 
     content = ""
     for mod in diff["diff"]:
@@ -67,20 +66,15 @@ def get_diff_dict_v2(
 
 
 def get_diff_dict_v1(
-    project_id: str,
-    headers: Dict[str, str],
-    file_id: str,
-    _from: str,
-    _to: str,
+    project_id: str, browser, file_id: str, _from: str, _to: str
 ) -> Union[None, str]:
     diff_url = "https://www.overleaf.com/project/{}/doc/{}/diff".format(
         project_id, file_id
     )
     try:
-        # 500 error due to deleted file
-        diff = rget(
-            diff_url, params={"from": _from, "to": _to}, headers=headers
-        ).json()
+        # may generate 500 error due to deleted file
+        browser.open(diff_url, params={"from": _from, "to": _to})
+        diff = loads(browser.parsed.text)
     except JSONDecodeError:
         return None
 
@@ -143,14 +137,14 @@ def make_commit_header(
 
 def create_commit_v1(
     project_id: str,
-    headers: Dict[str, str],
+    browser,
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
 ):
     hint_length = 40
     for file_id, rev in upd["docs"].items():
         diff = get_diff_dict_v1(
-            project_id, headers, file_id, rev["fromV"], rev["toV"]
+            project_id, browser, file_id, rev["fromV"], rev["toV"]
         )
         if diff is None:
             continue
@@ -193,13 +187,11 @@ def do_commit(upd_meta_info: Dict, _from: str, _to: str, files: List[str]):
     Popen(commit_line, stdout=PIPE, env=env).communicate()
 
 
-def create_commit_v2(
-    project_id: str, headers: Dict[str, str], upd: Dict[str, str]
-):
+def create_commit_v2(project_id: str, browser, upd: Dict[str, str]):
     touched_files = []
     for _path in upd["pathnames"]:
         diff = get_diff_dict_v2(
-            project_id, headers, _path, upd["fromV"], upd["toV"]
+            project_id, browser, _path, upd["fromV"], upd["toV"]
         )
         write_file(diff, _path)
         touched_files.append(_path)
@@ -209,7 +201,7 @@ def create_commit_v2(
         if "add" in operation.keys():
             _path = operation["add"]["pathname"]
             diff = get_diff_dict_v2(
-                project_id, headers, _path, upd["fromV"], upd["toV"]
+                project_id, browser, _path, upd["fromV"], upd["toV"]
             )
             write_file(diff, _path)
         elif "rename" in operation.keys():
@@ -225,42 +217,76 @@ def create_commit_v2(
 
 def create_commit(
     project_id: str,
-    headers: Dict[str, str],
+    browser,
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
 ):
     if "pathnames" in upd.keys():
-        create_commit_v2(project_id, headers, upd)
+        create_commit_v2(project_id, browser, upd)
     else:
-        create_commit_v1(project_id, headers, upd, real_file_names)
+        create_commit_v1(project_id, browser, upd, real_file_names)
 
 
 def main():
-    assert len(argv) == 3, "Please input parameters correctly."
-    _, project_id, req_head_path = argv
+    browser = RoboBrowser(history=True, parser="html.parser")
+    browser.open("https://www.overleaf.com/login")
+    form = browser.get_form(action="/login")
 
-    with open(req_head_path, "r") as head:
-        data = [header.strip("\n").split(": ") for header in head.readlines()]
-        headers = {field.lower(): content for field, content in data}
+    user = input("Your Overleaf e-mail: ")
+    password = getpass("Your password: ")
 
-    print("Getting list of updates...", end="\r")
-    updates = get_update_dict(project_id, headers)["updates"]
+    form["email"].value = user
+    form["password"].value = password
+    browser.submit_form(form)
 
-    Path(project_id).mkdir(exist_ok=True)
-    chdir(project_id)
-    Popen("git init".split(), stdout=PIPE).communicate()
+    print("Authenticating...", end="\r")
 
-    num_commits, bar_width = len(updates), 70
-    real_file_names = {}
-    for index, upd in enumerate(reversed(updates)):
-        create_commit(project_id, headers, upd, real_file_names)
-        percent = (index + 1) / num_commits
-        bars = int(percent * bar_width) * "█"
-        print("{:>7.2%} [{:<70}]".format(percent, bars), end="\r")
+    if browser.url != "https://www.overleaf.com/project":
+        raise SystemExit("Authentication failed!")
 
-    print(
-        "{} revisions parsed.".format(num_commits), end=" " * bar_width + "\n"
-    )
+    print("Getting projects...", end="\r")
+    projects = loads(browser.find(id="data").text)["projects"]
+    ord_proj = sorted(projects, key=itemgetter("lastUpdated"), reverse=True)
+
+    line_fmt = "{:>3} {:<40} {:<26} {:<12}"
+
+    print(line_fmt.format("", "Project name", "Owner", "Last updated"))
+    for index, project in enumerate(ord_proj):
+        print(
+            line_fmt.format(
+                index + 1,
+                project["name"],
+                project["owner"]["email"],
+                project["lastUpdated"][:10],
+            )
+        )
+
+    # TODO input multiple projects (e.g. 1-3 4 7 10)
+    index = input("Choose the project index to be imported: ")
+    proj_list = sorted([int(index) - 1])
+
+    for num in proj_list:
+        proj_id, proj_name = ord_proj[num]["id"], ord_proj[num]["name"]
+        print("Getting list of updates...", end="\r")
+        updates = get_update_dict(proj_id, browser)["updates"]
+
+        Path(proj_name).mkdir(exist_ok=True)
+        chdir(proj_name)
+        Popen("git init".split(), stdout=PIPE).communicate()
+
+        num_commits, bar_width = len(updates), 70
+        real_file_names = {}
+        for index, upd in enumerate(reversed(updates)):
+            create_commit(proj_id, browser, upd, real_file_names)
+            percent = (index + 1) / num_commits
+            bars = int(percent * bar_width) * "█"
+            print("{:>7.2%} [{:<70}]".format(percent, bars), end="\r")
+
+        print(
+            "{} revisions parsed.".format(num_commits),
+            end=" " * bar_width + "\n",
+        )
+        chdir("..")
 
 
 if __name__ == "__main__":
