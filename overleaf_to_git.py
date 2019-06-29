@@ -227,6 +227,35 @@ def create_commit(
         create_commit_v1(project_id, browser, upd, real_file_names)
 
 
+def process_input(limit: int) -> List[int]:
+    exceed = True
+    while exceed:
+        _str = input("Choose the project indices to be imported: ")
+        sequence = create_sequences(_str)
+        exceed = any(num > limit for num in sequence) or not sequence
+    return sequence
+
+
+def create_sequences(string: str) -> List[int]:
+    raw_numbers = string.replace("-", " ").split()
+    ranges = [seq.split("-") for seq in string.split()]
+
+    all_numbers = all(num.isdigit() for num in raw_numbers)
+    any_zero = "0" in raw_numbers
+    any_long_seq = any(len(seq) > 2 for seq in ranges)
+    any_incomplete_seq = any("" in seq for seq in ranges)
+
+    if not all_numbers or any_zero or any_long_seq or any_incomplete_seq:
+        return []
+
+    sequence = set()
+    for item in ranges:
+        numbers = list(map(int, item))
+        sequence |= set(range(min(numbers), max(numbers) + 1))
+
+    return sorted(sequence)
+
+
 def main():
     browser = RoboBrowser(history=True, parser="html.parser")
     browser.open("https://www.overleaf.com/login")
@@ -261,12 +290,9 @@ def main():
             )
         )
 
-    # TODO input multiple projects (e.g. 1-3 4 7 10)
-    index = input("Choose the project index to be imported: ")
-    proj_list = sorted([int(index) - 1])
-
+    proj_list = process_input(len(ord_proj))
     for num in proj_list:
-        proj_id, proj_name = ord_proj[num]["id"], ord_proj[num]["name"]
+        proj_id, proj_name = ord_proj[num - 1]["id"], ord_proj[num - 1]["name"]
         print("Getting list of updates...", end="\r")
         updates = get_update_dict(proj_id, browser)["updates"]
 
