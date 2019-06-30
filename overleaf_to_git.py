@@ -11,7 +11,7 @@ from json import loads
 from json.decoder import JSONDecodeError
 from operator import itemgetter
 from os import chdir, environ, remove, rename
-from os.path import dirname
+from os.path import dirname, exists
 from pathlib import Path
 from subprocess import Popen, PIPE
 from typing import Dict, List, Union
@@ -165,7 +165,7 @@ def create_commit_v1(
         )
 
 
-def write_file(contents: Union[None, str], _path: str):
+def write_file(contents: str, _path: str):
     Path(dirname(_path)).mkdir(parents=True, exist_ok=True)
     with open(_path, "w") as file_handler:
         file_handler.write(contents)
@@ -193,8 +193,9 @@ def create_commit_v2(project_id: str, browser, upd: Dict[str, str]):
         diff = get_diff_dict_v2(
             project_id, browser, _path, upd["fromV"], upd["toV"]
         )
-        write_file(diff, _path)
-        touched_files.append(_path)
+        if diff:
+            write_file(diff, _path)
+            touched_files.append(_path)
 
     for operation in reversed(upd["project_ops"]):
         _path = None
@@ -203,14 +204,22 @@ def create_commit_v2(project_id: str, browser, upd: Dict[str, str]):
             diff = get_diff_dict_v2(
                 project_id, browser, _path, upd["fromV"], upd["toV"]
             )
-            write_file(diff, _path)
+            if diff:
+                write_file(diff, _path)
         elif "rename" in operation.keys():
-            _path = operation["rename"]["newPathname"]
-            rename(operation["rename"]["pathname"], _path)
+            src = operation["rename"]["pathname"]
+            if exists(src):
+                _path = operation["rename"]["newPathname"]
+                Path(dirname(_path)).mkdir(parents=True, exist_ok=True)
+                rename(operation["rename"]["pathname"], _path)
         elif "remove" in operation.keys():
-            _path = operation["remove"]["pathname"]
-            remove(_path)
-        touched_files.append(_path)
+            # TODO do not leave empty directories
+            src = operation["remove"]["pathname"]
+            if exists(src):
+                _path = src
+                remove(_path)
+        if _path:
+            touched_files.append(_path)
 
     do_commit(upd["meta"], upd["fromV"], upd["toV"], touched_files)
 
@@ -279,6 +288,9 @@ def main():
 
     line_fmt = "{:>3} {:<40} {:<26} {:<12}"
 
+    # TODO get updates for all projects before committing to give an overview
+    # of the progress
+    # %% [total progress bar] (proj_name [x/y revs])
     print(line_fmt.format("", "Project name", "Owner", "Last updated"))
     for index, project in enumerate(ord_proj):
         print(
@@ -309,7 +321,7 @@ def main():
             print("{:>7.2%} [{:<70}]".format(percent, bars), end="\r")
 
         print(
-            "{} revisions parsed.".format(num_commits),
+            "{} revisions parsed for {}.".format(num_commits, proj_name),
             end=" " * bar_width + "\n",
         )
         chdir("..")
