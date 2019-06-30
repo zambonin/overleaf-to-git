@@ -14,7 +14,7 @@ from os import chdir, environ, remove, rename
 from os.path import dirname, exists
 from pathlib import Path
 from subprocess import Popen, PIPE
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple, Union
 
 from robobrowser import RoboBrowser
 
@@ -24,7 +24,7 @@ CommitHeader = namedtuple(
 
 
 def get_update_dict(
-    project_id: str, browser, count: int = 1 << 20
+    browser, project_id: str, count: int = 1 << 20
 ) -> Dict[str, str]:
     browser.open(
         "https://www.overleaf.com/project/{}/updates".format(project_id),
@@ -136,8 +136,8 @@ def make_commit_header(
 
 
 def create_commit_v1(
-    project_id: str,
     browser,
+    project_id: str,
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
 ):
@@ -187,7 +187,7 @@ def do_commit(upd_meta_info: Dict, _from: str, _to: str, files: List[str]):
     Popen(commit_line, stdout=PIPE, env=env).communicate()
 
 
-def create_commit_v2(project_id: str, browser, upd: Dict[str, str]):
+def create_commit_v2(browser, project_id: str, upd: Dict[str, str]):
     touched_files = []
     for _path in upd["pathnames"]:
         diff = get_diff_dict_v2(
@@ -225,15 +225,15 @@ def create_commit_v2(project_id: str, browser, upd: Dict[str, str]):
 
 
 def create_commit(
-    project_id: str,
     browser,
+    project_id: str,
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
 ):
     if "pathnames" in upd.keys():
-        create_commit_v2(project_id, browser, upd)
+        create_commit_v2(browser, project_id, upd)
     else:
-        create_commit_v1(project_id, browser, upd, real_file_names)
+        create_commit_v1(browser, project_id, upd, real_file_names)
 
 
 def process_input(limit: int) -> List[int]:
@@ -265,33 +265,34 @@ def create_sequences(string: str) -> List[int]:
     return sorted(sequence)
 
 
-def main():
-    browser = RoboBrowser(history=True, parser="html.parser")
+def log(message: str):
+    print(message + "...", end="\r")
+
+
+def login(browser, user: str, password: str):
     browser.open("https://www.overleaf.com/login")
     form = browser.get_form(action="/login")
 
-    user = input("Your Overleaf e-mail: ")
-    password = getpass("Your password: ")
-
     form["email"].value = user
     form["password"].value = password
+
+    log("Authenticating")
     browser.submit_form(form)
 
-    print("Authenticating...", end="\r")
-
     if browser.url != "https://www.overleaf.com/project":
+        # automatic redirect if successful
         raise SystemExit("Authentication failed!")
 
-    print("Getting projects...", end="\r")
-    projects = loads(browser.find(id="data").text)["projects"]
+
+def get_project_updates(browser) -> List[Tuple[str, str, Dict[str, str]]]:
+    log("Getting list of projects")
+    raw_json = browser.find(id="data").text
+    projects = loads(raw_json)["projects"]
     ord_proj = sorted(projects, key=itemgetter("lastUpdated"), reverse=True)
 
     line_fmt = "{:>3} {:<40} {:<26} {:<12}"
-
-    # TODO get updates for all projects before committing to give an overview
-    # of the progress
-    # %% [total progress bar] (proj_name [x/y revs])
     print(line_fmt.format("", "Project name", "Owner", "Last updated"))
+
     for index, project in enumerate(ord_proj):
         print(
             line_fmt.format(
@@ -302,29 +303,47 @@ def main():
             )
         )
 
-    proj_list = process_input(len(ord_proj))
-    for num in proj_list:
-        proj_id, proj_name = ord_proj[num - 1]["id"], ord_proj[num - 1]["name"]
-        print("Getting list of updates...", end="\r")
-        updates = get_update_dict(proj_id, browser)["updates"]
+    proj_indices = process_input(len(ord_proj))
+    proj_updates = []
 
-        Path(proj_name).mkdir(exist_ok=True)
-        chdir(proj_name)
-        Popen("git init".split(), stdout=PIPE).communicate()
-
-        num_commits, bar_width = len(updates), 70
-        real_file_names = {}
-        for index, upd in enumerate(reversed(updates)):
-            create_commit(proj_id, browser, upd, real_file_names)
-            percent = (index + 1) / num_commits
-            bars = int(percent * bar_width) * "█"
-            print("{:>7.2%} [{:<70}]".format(percent, bars), end="\r")
-
-        print(
-            "{} revisions parsed for {}.".format(num_commits, proj_name),
-            end=" " * bar_width + "\n",
+    for index in proj_indices:
+        _id, name = ord_proj[index - 1]["id"], ord_proj[index - 1]["name"]
+        log("[{}] Getting update history".format(_id))
+        proj_updates.append(
+            (_id, name, get_update_dict(browser, _id)["updates"])
         )
-        chdir("..")
+
+    return proj_updates
+
+
+def create_project(browser, project, cur_upd: int, max_upd: int):
+    _id, name, proj_hist = project
+    upd_fmt = "[{:>36}]  {:>4}/{:>4} project  {:>4}/{:>4} total"
+    changes = len(proj_hist)
+
+    Path(name).mkdir(exist_ok=True)
+    chdir(name)
+    Popen("git init".split(), stdout=PIPE).communicate()
+
+    real_file_names = {}
+    for index, update in enumerate(reversed(proj_hist)):
+        cur_upd += 1
+        log(upd_fmt.format(name, index + 1, changes, cur_upd, max_upd))
+        create_commit(browser, _id, update, real_file_names)
+
+    chdir("..")
+
+
+def main():
+    browser = RoboBrowser(history=True, parser="html.parser")
+
+    login(browser, input("Your Overleaf e-mail: "), getpass("Password: "))
+    updates = get_project_updates(browser)
+
+    hist_lengths = [len(proj_hist) for _, _, proj_hist in updates]
+    max_upd = sum(hist_lengths)
+    for index, project in enumerate(updates):
+        create_project(browser, project, sum(hist_lengths[:index]), max_upd)
 
 
 if __name__ == "__main__":
