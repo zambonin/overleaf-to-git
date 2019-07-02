@@ -8,13 +8,12 @@ from collections import namedtuple
 from datetime import datetime
 from getpass import getpass
 from json import loads
-from json.decoder import JSONDecodeError
 from operator import itemgetter
 from os import chdir, environ, remove, rename
-from os.path import dirname, exists
+from os.path import dirname
 from pathlib import Path
 from subprocess import Popen, PIPE
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Any
 
 from robobrowser import RoboBrowser
 
@@ -24,7 +23,7 @@ CommitHeader = namedtuple(
 
 
 def get_update_dict(
-    browser, project_id: str, count: int = 1 << 20
+    browser: RoboBrowser, project_id: str, count: int = 1 << 20
 ) -> Dict[str, str]:
     browser.open(
         "https://www.overleaf.com/project/{}/updates".format(project_id),
@@ -34,28 +33,24 @@ def get_update_dict(
 
 
 def get_diff_dict_v2(
-    project_id: str, browser, _file: str, _from: str, _to: str
-) -> Union[None, str]:
+    project_id: str, browser: RoboBrowser, _file: str, _from: str, _to: str
+) -> str:
     diff_url = "https://www.overleaf.com/project/{}/diff".format(project_id)
-    try:
-        # if there are multiple add/remove operations within a single
-        # diff range, Overleaf shows an older version of the file,
-        # and due to this fact `toV` is used twice to guarantee that
-        # the latest version is obtained (but it may fail anyway)
-        browser.open(
-            diff_url, params={"pathname": _file, "from": _to, "to": _to}
-        )
-        diff = loads(browser.parsed.text)
-    except JSONDecodeError:
+    browser.open(diff_url, params={"pathname": _file, "from": _to, "to": _to})
+
+    # if there are multiple add/remove operations within a single
+    # diff range, Overleaf shows an older version of the file,
+    # and due to this fact `toV` is used twice to guarantee that
+    # the latest version is obtained (but it may fail anyway)
+    if browser.response.status_code == 500:
         browser.open(
             diff_url, params={"pathname": _file, "from": _from, "to": _to}
         )
-        diff = loads(browser.parsed.text)
 
+    diff = loads(browser.parsed.text)
     content = ""
     for mod in diff["diff"]:
         if mod == "binary":
-            content = None
             continue
         if "u" in mod.keys():
             content += mod["u"]
@@ -66,18 +61,17 @@ def get_diff_dict_v2(
 
 
 def get_diff_dict_v1(
-    project_id: str, browser, file_id: str, _from: str, _to: str
-) -> Union[None, str]:
+    project_id: str, browser: RoboBrowser, file_id: str, _from: str, _to: str
+) -> str:
     diff_url = "https://www.overleaf.com/project/{}/doc/{}/diff".format(
         project_id, file_id
     )
-    try:
-        # may generate 500 error due to deleted file
-        browser.open(diff_url, params={"from": _from, "to": _to})
-        diff = loads(browser.parsed.text)
-    except JSONDecodeError:
-        return None
+    browser.open(diff_url, params={"from": _from, "to": _to})
 
+    if browser.response.status_code == 500:
+        return ""
+
+    diff = loads(browser.parsed.text)
     content = ""
     for mod in diff["diff"]:
         if "u" in mod.keys():
@@ -89,7 +83,7 @@ def get_diff_dict_v1(
 
 
 def make_commit_header(
-    upd_meta_info: Dict, _from: str, _to: str, files: List[str]
+    upd_meta_info: Dict[str, Any], _from: str, _to: str, files: List[str]
 ) -> CommitHeader:
     def parse_author(first_author: Dict[str, str]) -> str:
         return "{} {} <{}>".format(
@@ -136,9 +130,9 @@ def make_commit_header(
 
 
 def create_commit_v1(
-    browser,
+    browser: RoboBrowser,
     project_id: str,
-    upd: Dict[str, str],
+    upd: Dict[str, Any],
     real_file_names: Dict[str, str],
 ):
     hint_length = 40
@@ -146,8 +140,6 @@ def create_commit_v1(
         diff = get_diff_dict_v1(
             project_id, browser, file_id, rev["fromV"], rev["toV"]
         )
-        if diff is None:
-            continue
 
         if file_id not in real_file_names.keys():
             print("\nHint: {}".format(diff[:hint_length]))
@@ -171,7 +163,9 @@ def write_file(contents: str, _path: str):
         file_handler.write(contents)
 
 
-def do_commit(upd_meta_info: Dict, _from: str, _to: str, files: List[str]):
+def do_commit(
+    upd_meta_info: Dict[str, Any], _from: str, _to: str, files: List[str]
+):
     commit_header = make_commit_header(upd_meta_info, _from, _to, files)
     commit_line = (
         "git",
@@ -187,45 +181,47 @@ def do_commit(upd_meta_info: Dict, _from: str, _to: str, files: List[str]):
     Popen(commit_line, stdout=PIPE, env=env).communicate()
 
 
-def create_commit_v2(browser, project_id: str, upd: Dict[str, str]):
-    touched_files = []
+def create_commit_v2(
+    browser: RoboBrowser, project_id: str, upd: Dict[str, Any]
+):
     for _path in upd["pathnames"]:
         diff = get_diff_dict_v2(
             project_id, browser, _path, upd["fromV"], upd["toV"]
         )
-        if diff:
-            write_file(diff, _path)
-            touched_files.append(_path)
+        write_file(diff, _path)
 
     for operation in reversed(upd["project_ops"]):
-        _path = None
         if "add" in operation.keys():
             _path = operation["add"]["pathname"]
             diff = get_diff_dict_v2(
                 project_id, browser, _path, upd["fromV"], upd["toV"]
             )
-            if diff:
-                write_file(diff, _path)
+            write_file(diff, _path)
         elif "rename" in operation.keys():
-            src = operation["rename"]["pathname"]
-            if exists(src):
-                _path = operation["rename"]["newPathname"]
-                Path(dirname(_path)).mkdir(parents=True, exist_ok=True)
-                rename(operation["rename"]["pathname"], _path)
+            src, dest = (
+                operation["rename"]["pathname"],
+                operation["rename"]["newPathname"],
+            )
+            Path(dirname(dest)).mkdir(parents=True, exist_ok=True)
+            rename(src, dest)
         elif "remove" in operation.keys():
             # TODO do not leave empty directories
-            src = operation["remove"]["pathname"]
-            if exists(src):
-                _path = src
-                remove(_path)
-        if _path:
-            touched_files.append(_path)
+            remove(operation["remove"]["pathname"])
+
+    touched_files = [_path for _path in upd["pathnames"]] or sorted(
+        {
+            mod[op]["pathname"]
+            for op in ["add", "remove", "rename"]
+            for mod in upd["project_ops"]
+            if mod.get(op, "")
+        }
+    )
 
     do_commit(upd["meta"], upd["fromV"], upd["toV"], touched_files)
 
 
 def create_commit(
-    browser,
+    browser: RoboBrowser,
     project_id: str,
     upd: Dict[str, str],
     real_file_names: Dict[str, str],
@@ -237,7 +233,7 @@ def create_commit(
 
 
 def process_input(limit: int) -> List[int]:
-    exceed = True
+    exceed, sequence = True, []
     while exceed:
         _str = input("Choose the project indices to be imported: ")
         sequence = create_sequences(_str)
@@ -269,7 +265,7 @@ def log(message: str):
     print(message + "...", end="\r")
 
 
-def login(browser, user: str, password: str):
+def login(browser: RoboBrowser, user: str, password: str):
     browser.open("https://www.overleaf.com/login")
     form = browser.get_form(action="/login")
 
@@ -284,7 +280,7 @@ def login(browser, user: str, password: str):
         raise SystemExit("Authentication failed!")
 
 
-def get_project_updates(browser) -> List[Tuple[str, str, Dict[str, str]]]:
+def get_project_updates(browser: RoboBrowser) -> List[Tuple[str, str, Dict]]:
     log("Getting list of projects")
     raw_json = browser.find(id="data").text
     projects = loads(raw_json)["projects"]
@@ -316,7 +312,12 @@ def get_project_updates(browser) -> List[Tuple[str, str, Dict[str, str]]]:
     return proj_updates
 
 
-def create_project(browser, project, cur_upd: int, max_upd: int):
+def create_project(
+    browser: RoboBrowser,
+    project: Tuple[str, str, Dict],
+    cur_upd: int,
+    max_upd: int,
+):
     _id, name, proj_hist = project
     upd_fmt = "[{:>36}]  {:>4}/{:>4} project  {:>4}/{:>4} total"
     changes = len(proj_hist)
