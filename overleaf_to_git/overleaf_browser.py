@@ -50,3 +50,21 @@ def get_project_updates(
         proj_updates.append(OverleafProject(_id, name, dict_json["updates"]))
 
     return proj_updates
+
+
+def get_single_diff_v1(
+    browser: RoboBrowser,
+    project_id: str,
+    file_id: str,
+    old_rev_id: str,
+    new_rev_id: str,
+) -> Dict[str, Any]:
+    diff_url = "https://www.overleaf.com/project/{}/doc/{}/diff".format(
+        project_id, file_id
+    )
+    browser.open(diff_url, params={"from": old_rev_id, "to": new_rev_id})
+
+    if browser.response.status_code == 500:
+        return ""
+
+    return loads(browser.parsed.text)

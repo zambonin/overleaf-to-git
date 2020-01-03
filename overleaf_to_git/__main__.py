@@ -8,7 +8,11 @@ from typing import List
 
 from robobrowser import RoboBrowser
 
-from .data_composer import create_sequences, display_projects
+from .data_composer import (
+    create_project_history,
+    create_sequences,
+    display_projects,
+)
 from .overleaf_browser import get_project_list, get_project_updates, login
 
 
@@ -30,3 +34,10 @@ print(display_projects(ALL_PROJECTS))
 UPDATES = get_project_updates(
     BROWSER, ALL_PROJECTS, process_input(len(ALL_PROJECTS))
 )
+
+HIST_LENGTHS = [len(project.updates) for project in UPDATES]
+TOTAL_UPDATES = sum(HIST_LENGTHS)
+for index, project in enumerate(UPDATES):
+    phist = create_project_history(
+        BROWSER, project, sum(HIST_LENGTHS[:index]), TOTAL_UPDATES
+    )
