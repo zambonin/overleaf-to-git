@@ -2,8 +2,11 @@
 # pylint: disable=C0330
 
 from __future__ import absolute_import
-from json import loads
+from glob import glob
+from json import dump, load, loads
 from operator import itemgetter
+from os import path
+from tempfile import gettempdir, mkdtemp
 from typing import Any, Dict, List, NamedTuple
 
 from robobrowser import RoboBrowser
@@ -52,6 +55,30 @@ def get_project_updates(
     return proj_updates
 
 
+def cache_responses(func):
+    def decorated(*args, **kwargs):
+        _, proj_id, file_id, old_id, new_id = args
+        find_cache_dir = glob(path.join(gettempdir(), proj_id + "-*"))
+        if not find_cache_dir:
+            cache_dir = mkdtemp(prefix=proj_id + "-")
+        else:
+            cache_dir = find_cache_dir[0]
+
+        cached_json_path = "{}_{}_{}.json".format(
+            file_id.replace("/", "-"), old_id, new_id
+        )
+        full_path = path.join(cache_dir, cached_json_path)
+
+        if not path.exists(full_path):
+            data = func(*args, **kwargs)
+            dump(data, open(full_path, "w+"))
+
+        return load(open(full_path, "r"))
+
+    return decorated
+
+
+@cache_responses
 def get_single_diff_v1(
     browser: RoboBrowser,
     project_id: str,
@@ -70,6 +97,7 @@ def get_single_diff_v1(
     return loads(browser.parsed.text)
 
 
+@cache_responses
 def get_single_diff_v2(
     browser: RoboBrowser,
     project_id: str,
