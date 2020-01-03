@@ -7,10 +7,14 @@ from typing import Any, Dict, List, NamedTuple
 
 from robobrowser import RoboBrowser
 
-from .overleaf_browser import get_single_diff_v1, OverleafProject
+from .overleaf_browser import (
+    get_single_diff_v1,
+    get_single_diff_v2,
+    OverleafProject,
+)
 
 
-class SharelatexRevision(NamedTuple):
+class OverleafRevision(NamedTuple):
     file_id: str
     before_rev: int
     after_rev: int
@@ -18,6 +22,7 @@ class SharelatexRevision(NamedTuple):
     before_ts: int
     after_ts: int
     authors: List[Dict[str, str]]
+    operation: str
 
 
 def display_projects(projects: List[Dict[str, Any]]) -> str:
@@ -59,7 +64,7 @@ def create_sequences(string: str) -> List[int]:
 
 def create_project_history(
     browser: RoboBrowser, project: OverleafProject, cur_upd: int, max_upd: int
-) -> List[List[SharelatexRevision]]:
+) -> List[List[OverleafRevision]]:
     upd_fmt = "[{:>36}]  {:>4}/{:>4} project  {:>4}/{:>4} total"
     changes = len(project.updates)
     all_revs = []
@@ -70,14 +75,29 @@ def create_project_history(
             upd_fmt.format(project.name, index + 1, changes, cur_upd, max_upd),
             end="\r",
         )
-        all_revs.append(create_single_rev_v1(browser, project.uid, update))
+        if "pathnames" not in update.keys():
+            all_revs.append(create_single_rev_v1(browser, project.uid, update))
+        else:
+            all_revs.append(create_single_rev_v2(browser, project.uid, update))
 
     return all_revs
 
 
+def flatten_diff(changes: Dict[str, str]) -> str:
+    contents = ""
+    for mod in changes:
+        if mod == "binary":
+            continue
+        if "u" in mod.keys():
+            contents += mod["u"]
+        if "i" in mod.keys():
+            contents += mod["i"]
+    return contents
+
+
 def create_single_rev_v1(
     browser: RoboBrowser, project_id: str, update: Dict[str, Any]
-) -> List[SharelatexRevision]:
+) -> List[OverleafRevision]:
     revs = []
 
     for file_id, ver in update["docs"].items():
@@ -85,22 +105,69 @@ def create_single_rev_v1(
             browser, project_id, file_id, ver["fromV"], ver["toV"]
         )
 
-        contents = ""
-        for mod in sdiff["diff"]:
-            if "u" in mod.keys():
-                contents += mod["u"]
-            if "i" in mod.keys():
-                contents += mod["i"]
-
         revs.append(
-            SharelatexRevision(
+            OverleafRevision(
                 file_id=file_id,
                 before_rev=ver["fromV"],
                 after_rev=ver["toV"],
+                contents=flatten_diff(sdiff["diff"]),
+                before_ts=update["meta"]["start_ts"],
+                after_ts=update["meta"]["end_ts"],
+                authors=update["meta"]["users"],
+                operation="sharelatex",
+            )
+        )
+
+    return revs
+
+
+def create_single_rev_v2(
+    browser: RoboBrowser, project_id: str, update: Dict[str, Any]
+) -> List[OverleafRevision]:
+    revs = []
+
+    for path in update["pathnames"]:
+        sdiff = get_single_diff_v2(
+            browser, project_id, path, update["fromV"], update["toV"]
+        )
+
+        revs.append(
+            OverleafRevision(
+                file_id=path,
+                before_rev=update["fromV"],
+                after_rev=update["toV"],
+                contents=flatten_diff(sdiff["diff"]),
+                before_ts=update["meta"]["start_ts"],
+                after_ts=update["meta"]["end_ts"],
+                authors=update["meta"]["users"],
+                operation="keep",
+            )
+        )
+
+    for operation in reversed(update["project_ops"]):
+        contents = ""
+        _op = list(operation.keys())[0]
+        path = operation[_op]["pathname"]
+
+        if _op == "add":
+            sdiff = get_single_diff_v2(
+                browser, project_id, path, update["fromV"], update["toV"]
+            )
+            contents = flatten_diff(sdiff["diff"])
+
+        elif _op == "rename":
+            contents = operation[_op]["newPathname"]
+
+        revs.append(
+            OverleafRevision(
+                file_id=path,
+                before_rev=update["fromV"],
+                after_rev=operation["atV"],
                 contents=contents,
                 before_ts=update["meta"]["start_ts"],
                 after_ts=update["meta"]["end_ts"],
                 authors=update["meta"]["users"],
+                operation=_op,
             )
         )
 

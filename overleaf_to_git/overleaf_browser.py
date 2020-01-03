@@ -68,3 +68,22 @@ def get_single_diff_v1(
         return ""
 
     return loads(browser.parsed.text)
+
+
+def get_single_diff_v2(
+    browser: RoboBrowser,
+    project_id: str,
+    file_id: str,
+    old_rev_id: str,
+    new_rev_id: str,
+) -> Dict[str, Any]:
+    diff_url = "https://www.overleaf.com/project/{}/diff".format(project_id)
+    browser.open(
+        diff_url,
+        params={"pathname": file_id, "from": old_rev_id, "to": new_rev_id},
+    )
+
+    if browser.response.status_code == 500:
+        return ""
+
+    return loads(browser.parsed.text)
