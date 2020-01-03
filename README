@@ -1,0 +1,19 @@
+A Python module that translates Overleaf's project history into Git
+repositories. It uses RoboBrowser to navigate around the site and obtain the
+correct diffs.
+
+The module will create a subdirectory with the project file tree and Git commit
+history. To convert Overleaf projects into Git repositories, simply use the
+command `python -m overleaf_to_git`. After e-mail authentication, one may
+choose multiple projects to be converted. The module will show progress
+information as it creates commits.
+
+Some limitations are as follows.
+
+ (i) Binary files, as well as files that are marked as binary due to an
+     empirical ~1MB diff threshold, are not tracked by Overleaf. As such,
+     commits that would be empty with these files are not created.
+
+(ii) The module purposely takes some time to construct the commits as to not
+     connect to Overleaf's servers too frequently. Ergo, it may take a few
+     minutes to complete execution depending on the size of the projects.
