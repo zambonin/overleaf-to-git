@@ -7,10 +7,13 @@ from getpass import getpass
 
 from robobrowser import RoboBrowser
 
-from .overleaf_browser import login
+from .data_composer import display_projects
+from .overleaf_browser import get_project_list, login
 
-login(
-    RoboBrowser(history=True, parser="html.parser"),
-    input("Your Overleaf e-mail: "),
-    getpass("Password: "),
-)
+
+BROWSER = RoboBrowser(history=True, parser="html.parser")
+
+login(BROWSER, input("Your Overleaf e-mail: "), getpass("Password: "))
+
+ALL_PROJECTS = get_project_list(BROWSER)
+display_projects(ALL_PROJECTS)
