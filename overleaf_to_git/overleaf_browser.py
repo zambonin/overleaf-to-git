@@ -38,21 +38,11 @@ def get_project_list(browser: RoboBrowser) -> List[Dict[str, Any]]:
 
 
 def get_project_updates(
-    browser: RoboBrowser,
-    projects: List,
-    indices: List[int],
-    count: int = 1 << 20,
-) -> List[OverleafProject]:
-    proj_updates = []
+    browser: RoboBrowser, _id: str, count: int = 1 << 20
+) -> Dict[str, Any]:
     url = "https://www.overleaf.com/project/{}/updates"
-
-    for index in indices:
-        _id, name = projects[index - 1]["id"], projects[index - 1]["name"]
-        browser.open(url.format(_id), params={"min_count": count})
-        dict_json = loads(browser.parsed.text)
-        proj_updates.append(OverleafProject(_id, name, dict_json["updates"]))
-
-    return proj_updates
+    browser.open(url.format(_id), params={"min_count": count})
+    return loads(browser.parsed.text)["updates"]
 
 
 def cache_responses(func):

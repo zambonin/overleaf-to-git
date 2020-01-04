@@ -10,10 +10,11 @@ from robobrowser import RoboBrowser
 
 from .data_composer import (
     create_project_history,
+    create_projects,
     create_sequences,
     display_projects,
 )
-from .overleaf_browser import get_project_list, get_project_updates, login
+from .overleaf_browser import get_project_list, login
 
 
 def process_input(limit: int) -> List[int]:
@@ -31,13 +32,13 @@ login(BROWSER, input("Your Overleaf e-mail: "), getpass("Password: "))
 ALL_PROJECTS = get_project_list(BROWSER)
 print(display_projects(ALL_PROJECTS))
 
-UPDATES = get_project_updates(
+PROJECTS = create_projects(
     BROWSER, ALL_PROJECTS, process_input(len(ALL_PROJECTS))
 )
-
-HIST_LENGTHS = [len(project.updates) for project in UPDATES]
+HIST_LENGTHS = [len(project.updates) for project in PROJECTS]
 TOTAL_UPDATES = sum(HIST_LENGTHS)
-for index, project in enumerate(UPDATES):
+
+for index, project in enumerate(PROJECTS):
     phist = create_project_history(
         BROWSER, project, sum(HIST_LENGTHS[:index]), TOTAL_UPDATES
     )

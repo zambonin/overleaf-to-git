@@ -10,19 +10,24 @@ from robobrowser import RoboBrowser
 from .overleaf_browser import (
     get_single_diff_v1,
     get_single_diff_v2,
+    get_project_updates,
     OverleafProject,
 )
 
 
-class OverleafRevision(NamedTuple):
+class OverleafSingleRevision(NamedTuple):
     file_id: str
     before_rev: int
     after_rev: int
     contents: str
+    operation: str
+
+
+class OverleafRevision(NamedTuple):
+    authors: List[Dict[str, str]]
     before_ts: int
     after_ts: int
-    authors: List[Dict[str, str]]
-    operation: str
+    file_revs: List[OverleafSingleRevision]
 
 
 def display_projects(projects: List[Dict[str, Any]]) -> str:
@@ -62,9 +67,23 @@ def create_sequences(string: str) -> List[int]:
     return sorted(sequence)
 
 
+def create_projects(
+    browser: RoboBrowser, projects: List[Dict[str, Any]], indices: List[int],
+) -> List[OverleafProject]:
+    chosen_projects = []
+
+    for index in indices:
+        _id, name = projects[index - 1]["id"], projects[index - 1]["name"]
+        chosen_projects.append(
+            OverleafProject(_id, name, get_project_updates(browser, _id))
+        )
+
+    return chosen_projects
+
+
 def create_project_history(
     browser: RoboBrowser, project: OverleafProject, cur_upd: int, max_upd: int
-) -> List[List[OverleafRevision]]:
+) -> List[OverleafRevision]:
     upd_fmt = "[{:>36}]  {:>4}/{:>4} project  {:>4}/{:>4} total"
     changes = len(project.updates)
     all_revs = []
@@ -97,7 +116,7 @@ def flatten_diff(changes: Dict[str, str]) -> str:
 
 def create_single_rev_v1(
     browser: RoboBrowser, project_id: str, update: Dict[str, Any]
-) -> List[OverleafRevision]:
+) -> OverleafRevision:
     revs = []
 
     for file_id, ver in update["docs"].items():
@@ -106,24 +125,26 @@ def create_single_rev_v1(
         )
 
         revs.append(
-            OverleafRevision(
+            OverleafSingleRevision(
                 file_id=file_id,
                 before_rev=ver["fromV"],
                 after_rev=ver["toV"],
                 contents=flatten_diff(sdiff["diff"]),
-                before_ts=update["meta"]["start_ts"],
-                after_ts=update["meta"]["end_ts"],
-                authors=update["meta"]["users"],
                 operation="sharelatex",
             )
         )
 
-    return revs
+    return OverleafRevision(
+        authors=update["meta"]["users"],
+        before_ts=update["meta"]["start_ts"],
+        after_ts=update["meta"]["end_ts"],
+        file_revs=revs,
+    )
 
 
 def create_single_rev_v2(
     browser: RoboBrowser, project_id: str, update: Dict[str, Any]
-) -> List[OverleafRevision]:
+) -> OverleafRevision:
     revs = []
 
     for path in update["pathnames"]:
@@ -132,14 +153,11 @@ def create_single_rev_v2(
         )
 
         revs.append(
-            OverleafRevision(
+            OverleafSingleRevision(
                 file_id=path,
                 before_rev=update["fromV"],
                 after_rev=update["toV"],
                 contents=flatten_diff(sdiff["diff"]),
-                before_ts=update["meta"]["start_ts"],
-                after_ts=update["meta"]["end_ts"],
-                authors=update["meta"]["users"],
                 operation="keep",
             )
         )
@@ -159,16 +177,18 @@ def create_single_rev_v2(
             contents = operation[_op]["newPathname"]
 
         revs.append(
-            OverleafRevision(
+            OverleafSingleRevision(
                 file_id=path,
                 before_rev=update["fromV"],
                 after_rev=operation["atV"],
                 contents=contents,
-                before_ts=update["meta"]["start_ts"],
-                after_ts=update["meta"]["end_ts"],
-                authors=update["meta"]["users"],
                 operation=_op,
             )
         )
 
-    return revs
+    return OverleafRevision(
+        authors=update["meta"]["users"],
+        before_ts=update["meta"]["start_ts"],
+        after_ts=update["meta"]["end_ts"],
+        file_revs=revs,
+    )
