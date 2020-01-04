@@ -41,8 +41,21 @@ def get_project_updates(
     browser: RoboBrowser, _id: str, count: int = 1 << 20
 ) -> Dict[str, Any]:
     url = "https://www.overleaf.com/project/{}/updates"
+    history = []
+
     browser.open(url.format(_id), params={"min_count": count})
-    return loads(browser.parsed.text)["updates"]
+    data = loads(browser.parsed.text)
+    history += data["updates"]
+
+    while "nextBeforeTimestamp" in data.keys():
+        browser.open(
+            url.format(_id),
+            params={"min_count": count, "before": data["nextBeforeTimestamp"]},
+        )
+        data = loads(browser.parsed.text)
+        history += data["updates"]
+
+    return history
 
 
 def cache_responses(func):
@@ -82,7 +95,7 @@ def get_single_diff_v1(
     browser.open(diff_url, params={"from": old_rev_id, "to": new_rev_id})
 
     if browser.response.status_code == 500:
-        return ""
+        return {"diff": {}}
 
     return loads(browser.parsed.text)
 
@@ -102,6 +115,6 @@ def get_single_diff_v2(
     )
 
     if browser.response.status_code == 500:
-        return ""
+        return {"diff": {}}
 
     return loads(browser.parsed.text)
