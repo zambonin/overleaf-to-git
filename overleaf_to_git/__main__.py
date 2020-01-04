@@ -32,13 +32,13 @@ login(BROWSER, input("Your Overleaf e-mail: "), getpass("Password: "))
 ALL_PROJECTS = get_project_list(BROWSER)
 print(display_projects(ALL_PROJECTS))
 
-PROJECTS = create_projects(
-    BROWSER, ALL_PROJECTS, process_input(len(ALL_PROJECTS))
-)
-HIST_LENGTHS = [len(project.updates) for project in PROJECTS]
-TOTAL_UPDATES = sum(HIST_LENGTHS)
+PROJ_QNT = len(ALL_PROJECTS)
+INDICES = process_input(PROJ_QNT)
 
+for _ in range(PROJ_QNT + 5):
+    # clear one line at a time for every visible project plus input questions
+    print("\033[1A\033[2K", end="\r")
+
+PROJECTS = create_projects(BROWSER, ALL_PROJECTS, INDICES)
 for index, project in enumerate(PROJECTS):
-    phist = create_project_history(
-        BROWSER, project, sum(HIST_LENGTHS[:index]), TOTAL_UPDATES
-    )
+    phist = create_project_history(BROWSER, project)

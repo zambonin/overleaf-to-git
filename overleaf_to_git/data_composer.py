@@ -70,10 +70,15 @@ def create_sequences(string: str) -> List[int]:
 def create_projects(
     browser: RoboBrowser, projects: List[Dict[str, Any]], indices: List[int],
 ) -> List[OverleafProject]:
+    fmt = "[{:>36}]  {:>4}/{:>4} revision list"
+    total_projs = len(indices)
     chosen_projects = []
 
-    for index in indices:
+    for list_ind, index in enumerate(indices):
         _id, name = projects[index - 1]["id"], projects[index - 1]["name"]
+        msg = fmt.format(shorten(name, width=32), list_ind + 1, total_projs)
+        print(msg, end="\r")
+
         chosen_projects.append(
             OverleafProject(_id, name, get_project_updates(browser, _id))
         )
@@ -82,18 +87,16 @@ def create_projects(
 
 
 def create_project_history(
-    browser: RoboBrowser, project: OverleafProject, cur_upd: int, max_upd: int
+    browser: RoboBrowser, project: OverleafProject
 ) -> List[OverleafRevision]:
-    upd_fmt = "[{:>36}]  {:>4}/{:>4} project  {:>4}/{:>4} total"
+    fmt = "[{:>36}]  {:>4}/{:>4} individual revisions"
     changes = len(project.updates)
     all_revs = []
 
     for index, update in enumerate(reversed(project.updates)):
-        cur_upd += 1
-        print(
-            upd_fmt.format(project.name, index + 1, changes, cur_upd, max_upd),
-            end="\r",
-        )
+        msg = fmt.format(shorten(project.name, width=32), index + 1, changes)
+        print(msg, end="\r")
+
         if "pathnames" not in update.keys():
             all_revs.append(create_single_rev_v1(browser, project.uid, update))
         else:
