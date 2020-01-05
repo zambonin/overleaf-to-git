@@ -4,6 +4,7 @@
 
 from __future__ import absolute_import
 from getpass import getpass
+from os import getenv
 from typing import List
 
 from robobrowser import RoboBrowser
@@ -29,7 +30,11 @@ def process_input(limit: int) -> List[int]:
 
 
 BROWSER = RoboBrowser(history=True, parser="html.parser")
-login(BROWSER, input("Your Overleaf e-mail: "), getpass("Password: "))
+login(
+    BROWSER,
+    getenv("OVERLEAF_LOGIN") or input("Your Overleaf e-mail: "),
+    getenv("OVERLEAF_PASSWORD") or getpass(),
+)
 
 ALL_PROJECTS = get_project_list(BROWSER)
 print(display_projects(ALL_PROJECTS))

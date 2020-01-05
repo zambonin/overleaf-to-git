@@ -2,18 +2,33 @@ A Python module that translates Overleaf's project history into Git
 repositories. It uses RoboBrowser to navigate around the site and obtain the
 correct diffs.
 
-The module will create a subdirectory with the project file tree and Git commit
-history. To convert Overleaf projects into Git repositories, simply use the
-command `python -m overleaf_to_git`. After e-mail authentication, one may
-choose multiple projects to be converted. The module will show progress
-information as it creates commits.
+The module will create a temporary directory with the project file tree and Git
+commit history. To convert Overleaf projects into Git repositories, simply use
+the command `python -m overleaf_to_git`. After e-mail authentication, one may
+choose multiple projects to be converted. The module will show progress as it
+downloads information and creates commits. Authentication can be skipped if the
+environment variables `OVERLEAF_LOGIN` and `OVERLEAF_PASSWORD` are set.
 
-Some limitations are as follows.
+The whole ordeal takes some time to finish, since every revision of every file
+inside the projects is downloaded from Overleaf's servers. However, the raw
+JSON files are stored in the operating system's temporary directory to allow
+for resumed execution if anything goes wrong.
 
- (i) Binary files, as well as files that are marked as binary due to an
-     empirical ~1MB diff threshold, are not tracked by Overleaf. As such,
-     commits that would be empty with these files are not created.
+One known limitation is that binary files, as well as files that are marked as
+binary due to an empirical ~1MB diff threshold, are not tracked by Overleaf. As
+such, these files are committed as empty. Furthermore, files opened on Overleaf
+may be marked as modified even though there are no apparent modifications. This
+is likely the result of a user rapidly adding and removing content, and will be
+shown on the commit message.
 
-(ii) The module purposely takes some time to construct the commits as to not
-     connect to Overleaf's servers too frequently. Ergo, it may take a few
-     minutes to complete execution depending on the size of the projects.
+A tool such as `git-filter-repo` may be used to comb through the newly created
+repository and modify it to taste. The aim of this module is to import as much
+content as possible, even if it seems redundant. In the case of old projects
+from ShareLaTeX, the directory structure has to be recreated by hand.
+
+DISCLAIMER: this project may not adhere to Overleaf's Acceptable Use Policy
+under the notion of "scraping". Nonetheless, the author claims that Overleaf
+does not provide a "publicly supported interface" to archive your project
+history, even to paid users. (This project partially simulates a user clicking
+through all revisions in the project's "history" tab, and saving the output
+into a HAR file, using the network monitor of a common browser.)
