@@ -2,6 +2,7 @@
 # pylint: disable=C0330
 
 from __future__ import absolute_import
+from operator import attrgetter
 from textwrap import shorten
 from typing import Any, Dict, List, NamedTuple
 
@@ -28,6 +29,12 @@ class OverleafRevision(NamedTuple):
     before_ts: int
     after_ts: int
     file_revs: List[OverleafSingleRevision]
+
+
+class OverleafProjectWithHistory(NamedTuple):
+    uid: str
+    name: str
+    updates: List[OverleafRevision]
 
 
 def display_projects(projects: List[Dict[str, Any]]) -> str:
@@ -141,7 +148,7 @@ def create_single_rev_v1(
         authors=update["meta"]["users"],
         before_ts=update["meta"]["start_ts"],
         after_ts=update["meta"]["end_ts"],
-        file_revs=revs,
+        file_revs=sorted(revs, key=attrgetter("after_rev"), reverse=True),
     )
 
 
@@ -172,7 +179,7 @@ def create_single_rev_v2(
 
         if _op == "add":
             sdiff = get_single_diff_v2(
-                browser, project_id, path, update["fromV"], update["toV"]
+                browser, project_id, path, operation["atV"], update["toV"]
             )
             contents = flatten_diff(sdiff["diff"])
 
@@ -182,8 +189,8 @@ def create_single_rev_v2(
         revs.append(
             OverleafSingleRevision(
                 file_id=path,
-                before_rev=update["fromV"],
-                after_rev=operation["atV"],
+                before_rev=operation["atV"],
+                after_rev=update["toV"],
                 contents=contents,
                 operation=_op,
             )

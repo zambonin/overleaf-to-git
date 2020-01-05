@@ -13,7 +13,9 @@ from .data_composer import (
     create_projects,
     create_sequences,
     display_projects,
+    OverleafProjectWithHistory,
 )
+from .git_operations import create_repo
 from .overleaf_browser import get_project_list, login
 
 
@@ -42,3 +44,6 @@ for _ in range(PROJ_QNT + 5):
 PROJECTS = create_projects(BROWSER, ALL_PROJECTS, INDICES)
 for index, project in enumerate(PROJECTS):
     phist = create_project_history(BROWSER, project)
+    print("\033[2K", end="\r")
+    create_repo(OverleafProjectWithHistory(project.uid, project.name, phist))
+    print("\033[2K", end="\r")
