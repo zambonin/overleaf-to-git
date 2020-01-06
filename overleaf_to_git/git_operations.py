@@ -62,7 +62,7 @@ def file_inside_dir(file_path: str):
 
 def write_file(file_path: str, contents: str):
     file_inside_dir(file_path)
-    with open(file_path, "w+") as file_handler:
+    with open(file_path, "w+", encoding="utf8") as file_handler:
         file_handler.write(contents)
 
 

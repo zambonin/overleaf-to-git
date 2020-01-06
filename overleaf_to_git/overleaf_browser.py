@@ -44,7 +44,7 @@ def get_project_updates(
     history = []
 
     browser.open(url.format(_id), params={"min_count": count})
-    data = loads(browser.parsed.text)
+    data = browser.response.json()
     history += data["updates"]
 
     while "nextBeforeTimestamp" in data.keys():
@@ -52,7 +52,7 @@ def get_project_updates(
             url.format(_id),
             params={"min_count": count, "before": data["nextBeforeTimestamp"]},
         )
-        data = loads(browser.parsed.text)
+        data = browser.response.json()
         history += data["updates"]
 
     return history
@@ -74,9 +74,13 @@ def cache_responses(func):
 
         if not path.exists(full_path):
             data = func(*args, **kwargs)
-            dump(data, open(full_path, "w+"))
+            dump(
+                data,
+                open(full_path, "w+", encoding="utf8"),
+                ensure_ascii=False,
+            )
 
-        return load(open(full_path, "r"))
+        return load(open(full_path, "r", encoding="utf8"))
 
     return decorated
 
@@ -97,7 +101,7 @@ def get_single_diff_v1(
     if browser.response.status_code == 500:
         return {"diff": {}}
 
-    return loads(browser.parsed.text)
+    return browser.response.json()
 
 
 @cache_responses
@@ -117,4 +121,4 @@ def get_single_diff_v2(
     if browser.response.status_code == 500:
         return {"diff": {}}
 
-    return loads(browser.parsed.text)
+    return browser.response.json()
