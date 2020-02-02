@@ -43,6 +43,8 @@ def display_projects(projects: List[Dict[str, Any]]) -> str:
     output += line_fmt.format("", "Project name", "Owner", "Last update")
 
     for index, project in enumerate(projects):
+        if project["accessLevel"] == "readOnly":
+            continue
         email = project["owner"]["email"]
         output += line_fmt.format(
             index + 1,
