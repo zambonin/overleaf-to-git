@@ -7,6 +7,8 @@ from getpass import getpass
 from os import getenv
 from typing import List
 
+import werkzeug
+werkzeug.cached_property = werkzeug.utils.cached_property
 from robobrowser import RoboBrowser
 
 from .data_composer import (
