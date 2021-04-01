@@ -32,8 +32,8 @@ def login(browser: RoboBrowser, username: str, password: str):
 
 
 def get_project_list(browser: RoboBrowser) -> List[Dict[str, Any]]:
-    raw_json = browser.find(id="data").contents[0]
-    dict_json = loads(raw_json)["projects"]
+    raw_json = browser.find("meta", attrs={"name": "ol-projects"})["content"]
+    dict_json = loads(raw_json)
     return sorted(dict_json, key=itemgetter("lastUpdated"), reverse=True)
 
 
