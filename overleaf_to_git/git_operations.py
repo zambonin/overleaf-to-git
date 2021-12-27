@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=C0330,W1639
+# pylint: disable=C0209
 
 from __future__ import absolute_import, division
 from datetime import datetime
@@ -8,16 +8,16 @@ from pathlib import Path
 from subprocess import Popen, PIPE
 from tempfile import mkdtemp
 from textwrap import shorten
-from typing import Dict, List
 
-from .data_composer import (
+from .custom_types import (
+    OverleafAuthor,
     OverleafProjectWithHistory,
-    OverleafSingleRevision,
     OverleafRevision,
+    OverleafSingleRevision,
 )
 
 
-def parse_author(first_author: Dict[str, str]) -> str:
+def parse_author(first_author: OverleafAuthor) -> str:
     if "last_name" in first_author.keys() and first_author["last_name"]:
         return "{} {} <{}>".format(
             first_author["first_name"],
@@ -32,7 +32,7 @@ def parse_date(stamp: int) -> str:
 
 
 def parse_message(
-    authors: Dict[str, str], revs: List[OverleafSingleRevision]
+    authors: list[OverleafAuthor], revs: list[OverleafSingleRevision]
 ) -> str:
     message = "overleaf_to_git: "
     touched = {}
@@ -41,8 +41,9 @@ def parse_message(
             rev.file_id, rev.before_rev, rev.after_rev
         )
 
-    for line in touched:
-        message += touched[line]
+    # removes duplicated entries mentioning the same file
+    for line in touched.values():
+        message += line
 
     if len(authors) > 1:
         message += "\n"
@@ -76,7 +77,8 @@ def do_commit(update: OverleafRevision):
         else:
             write_file(rev.file_id, rev.contents)
             command = ["git", "add", "-f", rev.file_id]
-        Popen(command, stdout=PIPE).communicate()
+        with Popen(command, stdout=PIPE) as cmd:
+            cmd.communicate()
 
     commit_line = (
         "git",
@@ -88,13 +90,15 @@ def do_commit(update: OverleafRevision):
 
     env = environ.copy()
     env["GIT_COMMITTER_DATE"] = parse_date(update.after_ts)
-    Popen(commit_line, stdout=PIPE, env=env).communicate()
+    with Popen(commit_line, stdout=PIPE, env=env) as cmd:
+        cmd.communicate()
 
 
 def create_repo(project: OverleafProjectWithHistory):
     repo_path = mkdtemp(prefix="git-{}-".format(project.name))
     chdir(repo_path)
-    Popen("git init".split(), stdout=PIPE).communicate()
+    with Popen("git init".split(), stdout=PIPE) as cmd:
+        cmd.communicate()
 
     fmt = "[{:>36}]  {:>4}/{:>4} commits"
     total_commits = len(project.updates)

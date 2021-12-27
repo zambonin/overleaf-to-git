@@ -1,43 +1,28 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=C0330
 
 from __future__ import absolute_import
 from operator import attrgetter
 from textwrap import shorten
-from typing import Any, Dict, List, NamedTuple
 
 from robobrowser import RoboBrowser
+
+from .custom_types import (
+    OverleafProject,
+    OverleafProjectUpdate,
+    OverleafProjectWithHistory,
+    OverleafRawProject,
+    OverleafRevision,
+    OverleafSingleRevision,
+)
 
 from .overleaf_browser import (
     get_single_diff_v1,
     get_single_diff_v2,
     get_project_updates,
-    OverleafProject,
 )
 
 
-class OverleafSingleRevision(NamedTuple):
-    file_id: str
-    before_rev: int
-    after_rev: int
-    contents: str
-    operation: str
-
-
-class OverleafRevision(NamedTuple):
-    authors: List[Dict[str, str]]
-    before_ts: int
-    after_ts: int
-    file_revs: List[OverleafSingleRevision]
-
-
-class OverleafProjectWithHistory(NamedTuple):
-    uid: str
-    name: str
-    updates: List[OverleafRevision]
-
-
-def display_projects(projects: List[Dict[str, Any]]) -> str:
+def display_projects(projects: list[OverleafRawProject]) -> str:
     output = ""
     line_fmt = "{:>4}  {:<34}  {:<22}  {:<10}\n"
     output += line_fmt.format("", "Project name", "Owner", "Last update")
@@ -56,7 +41,7 @@ def display_projects(projects: List[Dict[str, Any]]) -> str:
     return output
 
 
-def create_sequences(string: str) -> List[int]:
+def create_sequences(string: str) -> list[int]:
     raw_numbers = string.replace("-", " ").split()
     ranges = [seq.split("-") for seq in string.split()]
 
@@ -77,15 +62,17 @@ def create_sequences(string: str) -> List[int]:
 
 
 def create_projects(
-    browser: RoboBrowser, projects: List[Dict[str, Any]], indices: List[int],
-) -> List[OverleafProject]:
+    browser: RoboBrowser,
+    projects: list[OverleafRawProject],
+    indices: list[int],
+) -> list[OverleafProject]:
     fmt = "[{:>36}]  {:>4}/{:>4} revision list"
-    total_projs = len(indices)
+    total_projects = len(indices)
     chosen_projects = []
 
     for list_ind, index in enumerate(indices):
         _id, name = projects[index - 1]["id"], projects[index - 1]["name"]
-        msg = fmt.format(shorten(name, width=32), list_ind + 1, total_projs)
+        msg = fmt.format(shorten(name, width=32), list_ind + 1, total_projects)
         print(msg, end="\r")
 
         chosen_projects.append(
@@ -97,7 +84,7 @@ def create_projects(
 
 def create_project_history(
     browser: RoboBrowser, project: OverleafProject
-) -> List[OverleafRevision]:
+) -> OverleafProjectWithHistory:
     fmt = "[{:>36}]  {:>4}/{:>4} individual revisions"
     changes = len(project.updates)
     all_revs = []
@@ -111,10 +98,10 @@ def create_project_history(
         else:
             all_revs.append(create_single_rev_v2(browser, project.uid, update))
 
-    return all_revs
+    return OverleafProjectWithHistory(project.uid, project.name, all_revs)
 
 
-def flatten_diff(changes: Dict[str, str]) -> str:
+def flatten_diff(changes: list[dict[str, str]]) -> str:
     contents = ""
     for mod in changes:
         if mod == "binary":
@@ -127,7 +114,7 @@ def flatten_diff(changes: Dict[str, str]) -> str:
 
 
 def create_single_rev_v1(
-    browser: RoboBrowser, project_id: str, update: Dict[str, Any]
+    browser: RoboBrowser, project_id: str, update: OverleafProjectUpdate
 ) -> OverleafRevision:
     revs = []
 
@@ -155,7 +142,7 @@ def create_single_rev_v1(
 
 
 def create_single_rev_v2(
-    browser: RoboBrowser, project_id: str, update: Dict[str, Any]
+    browser: RoboBrowser, project_id: str, update: OverleafProjectUpdate
 ) -> OverleafRevision:
     revs = []
 

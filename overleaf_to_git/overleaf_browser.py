@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=C0330
+# pylint: disable=C0209
 
 from __future__ import absolute_import
 from glob import glob
@@ -7,15 +7,14 @@ from json import dump, load, loads
 from operator import itemgetter
 from os import path
 from tempfile import gettempdir, mkdtemp
-from typing import Any, Dict, List, NamedTuple
 
 from robobrowser import RoboBrowser
 
-
-class OverleafProject(NamedTuple):
-    uid: str
-    name: str
-    updates: List[Dict[str, Any]]
+from .custom_types import (
+    OverleafProjectUpdate,
+    OverleafRawProject,
+    OverleafRawRevision,
+)
 
 
 def login(browser: RoboBrowser, username: str, password: str):
@@ -31,7 +30,7 @@ def login(browser: RoboBrowser, username: str, password: str):
         raise SystemExit("Authentication failed!")
 
 
-def get_project_list(browser: RoboBrowser) -> List[Dict[str, Any]]:
+def get_project_list(browser: RoboBrowser) -> list[OverleafRawProject]:
     raw_json = browser.find("meta", attrs={"name": "ol-projects"})["content"]
     dict_json = loads(raw_json)
     return sorted(dict_json, key=itemgetter("lastUpdated"), reverse=True)
@@ -39,7 +38,7 @@ def get_project_list(browser: RoboBrowser) -> List[Dict[str, Any]]:
 
 def get_project_updates(
     browser: RoboBrowser, _id: str, count: int = 1 << 20
-) -> Dict[str, Any]:
+) -> list[OverleafProjectUpdate]:
     url = "https://www.overleaf.com/project/{}/updates"
     history = []
 
@@ -74,11 +73,8 @@ def cache_responses(func):
 
         if not path.exists(full_path):
             data = func(*args, **kwargs)
-            dump(
-                data,
-                open(full_path, "w+", encoding="utf8"),
-                ensure_ascii=False,
-            )
+            with open(full_path, "w+", encoding="utf8") as file:
+                dump(data, file, ensure_ascii=False)
 
         return load(open(full_path, "r", encoding="utf8"))
 
@@ -90,16 +86,16 @@ def get_single_diff_v1(
     browser: RoboBrowser,
     project_id: str,
     file_id: str,
-    old_rev_id: str,
-    new_rev_id: str,
-) -> Dict[str, Any]:
+    old_rev_id: int,
+    new_rev_id: int,
+) -> OverleafRawRevision:
     diff_url = "https://www.overleaf.com/project/{}/doc/{}/diff".format(
         project_id, file_id
     )
     browser.open(diff_url, params={"from": old_rev_id, "to": new_rev_id})
 
     if browser.response.status_code == 500:
-        return {"diff": {}}
+        return {"diff": [{}]}
 
     return browser.response.json()
 
@@ -109,9 +105,9 @@ def get_single_diff_v2(
     browser: RoboBrowser,
     project_id: str,
     file_id: str,
-    old_rev_id: str,
-    new_rev_id: str,
-) -> Dict[str, Any]:
+    old_rev_id: int,
+    new_rev_id: int,
+) -> OverleafRawRevision:
     diff_url = "https://www.overleaf.com/project/{}/diff".format(project_id)
     browser.open(
         diff_url,
@@ -119,6 +115,6 @@ def get_single_diff_v2(
     )
 
     if browser.response.status_code == 500:
-        return {"diff": {}}
+        return {"diff": [{}]}
 
     return browser.response.json()
