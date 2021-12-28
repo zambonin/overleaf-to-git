@@ -17,20 +17,8 @@ from .custom_types import (
 )
 
 
-def login(browser: RoboBrowser, username: str, password: str):
-    browser.open("https://www.overleaf.com/login")
-    form = browser.get_form(action="/login")
-
-    form["email"].value = username
-    form["password"].value = password
-
-    browser.submit_form(form)
-    if browser.url != "https://www.overleaf.com/project":
-        # automatic redirection if login was successful
-        raise SystemExit("Authentication failed!")
-
-
 def get_project_list(browser: RoboBrowser) -> list[OverleafRawProject]:
+    browser.open("https://www.overleaf.com/project")
     raw_json = browser.find("meta", attrs={"name": "ol-projects"})["content"]
     dict_json = loads(raw_json)
     return sorted(dict_json, key=itemgetter("lastUpdated"), reverse=True)

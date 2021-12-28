@@ -3,9 +3,9 @@
 # pylint: disable=C0413
 
 from __future__ import absolute_import
-from getpass import getpass
-from os import getenv
 
+from browser_cookie3 import firefox as get_cookies_from_browser
+from requests import session
 import werkzeug
 
 werkzeug.cached_property = werkzeug.utils.cached_property
@@ -19,7 +19,7 @@ from .data_composer import (
     display_projects,
 )
 from .git_operations import create_repo
-from .overleaf_browser import get_project_list, login
+from .overleaf_browser import get_project_list
 
 
 def process_input(limit: int) -> list[int]:
@@ -31,11 +31,13 @@ def process_input(limit: int) -> list[int]:
     return sequence
 
 
-BROWSER = RoboBrowser(history=True, parser="html.parser")
-login(
-    BROWSER,
-    getenv("OVERLEAF_LOGIN") or input("Your Overleaf e-mail: "),
-    getenv("OVERLEAF_PASSWORD") or getpass(),
+SESSION = session()
+SESSION.cookies = get_cookies_from_browser(domain_name="overleaf.com")
+BROWSER = RoboBrowser(
+    history=True,
+    parser="html.parser",
+    user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:95.0) Gecko/20100101 Firefox/95.0",
+    session=SESSION,
 )
 
 ALL_PROJECTS = get_project_list(BROWSER)

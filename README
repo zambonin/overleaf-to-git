@@ -4,10 +4,11 @@ correct diffs.
 
 The module will create a temporary directory with the project file tree and Git
 commit history. To convert Overleaf projects into Git repositories, simply use
-the command `python -m overleaf_to_git`. After e-mail authentication, one may
-choose multiple projects to be converted. The module will show progress as it
-downloads information and creates commits. Authentication can be skipped if the
-environment variables `OVERLEAF_LOGIN` and `OVERLEAF_PASSWORD` are set.
+the command `python -m overleaf_to_git`. The module requires the user to be
+logged in a real browser, currently Firefox but easily configurable to be
+another browser supported by `browser_cookie3`. One may choose multiple
+projects to be converted. The module will show progress as it downloads
+information and creates commits.
 
 The whole ordeal takes some time to finish, since every revision of every file
 inside the projects is downloaded from Overleaf's servers. However, the raw
