@@ -12,15 +12,14 @@ information and creates commits.
 
 The whole ordeal takes some time to finish, since every revision of every file
 inside the projects is downloaded from Overleaf's servers. However, the raw
-JSON files are stored in the operating system's temporary directory to allow
-for resumed execution if anything goes wrong.
+files are stored in the operating system's temporary directory to allow for
+resumed execution at no cost to Overleaf's servers if anything goes wrong.
 
-One known limitation is that binary files, as well as files that are marked as
-binary due to an empirical ~1MB diff threshold, are not tracked by Overleaf. As
-such, these files are committed as empty. Furthermore, files opened on Overleaf
-may be marked as modified even though there are no apparent modifications. This
-is likely the result of a user rapidly adding and removing content, and will be
-shown on the commit message.
+Binary files are obtained via the download of old versions as ZIP files, with
+care taken so that the minimal number of ZIP files are downloaded. Furthermore,
+files opened on Overleaf may be marked as modified even though there are no
+apparent modifications. This is likely the result of a user rapidly adding and
+removing content, and will be shown on the commit message.
 
 A tool such as `git-filter-repo` may be used to comb through the newly created
 repository and modify it to taste. The aim of this module is to import as much

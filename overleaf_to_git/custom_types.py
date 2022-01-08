@@ -19,7 +19,7 @@ class OverleafSingleRevision(NamedTuple):
     file_id: str
     before_rev: int
     after_rev: int
-    contents: str
+    contents: str | bytes
     operation: str
 
 

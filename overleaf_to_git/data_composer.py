@@ -17,6 +17,7 @@ from .custom_types import (
 from .overleaf_browser import (
     get_single_diff,
     get_project_updates,
+    get_zip_package,
 )
 
 
@@ -95,61 +96,109 @@ def create_project_history(
     return OverleafProjectWithHistory(project.uid, project.name, all_revs)
 
 
-def flatten_diff(changes: list[dict[str, str]]) -> str:
-    contents = ""
-    for mod in changes:
+def create_single_text_rev(
+    browser: RoboBrowser,
+    project_id: str,
+    update: OverleafProjectUpdate,
+    path: str,
+) -> OverleafSingleRevision:
+    keyed_diff = get_single_diff(
+        browser, project_id, path, update["fromV"], update["toV"]
+    )
+
+    flat_diff = ""
+    for mod in keyed_diff["diff"]:
         if mod == "binary":
             continue
-        if "u" in mod.keys():
-            contents += mod["u"]
-        if "i" in mod.keys():
-            contents += mod["i"]
-    return contents
+        if "u" in mod:
+            flat_diff += mod["u"]
+        if "i" in mod:
+            flat_diff += mod["i"]
+
+    return OverleafSingleRevision(
+        file_id=path,
+        before_rev=update["fromV"],
+        after_rev=update["toV"],
+        contents=flat_diff,
+        operation="keep",
+    )
+
+
+def create_single_binary_rev(
+    browser: RoboBrowser,
+    project_id: str,
+    update: OverleafProjectUpdate,
+    operation: dict[str, dict[str, str] | int],
+) -> OverleafSingleRevision:
+    _op = list(operation.keys())[0]
+    path = operation[_op]["pathname"]
+
+    contents = ""
+    if _op == "add":
+        zip_at_version = get_zip_package(browser, project_id, update["toV"])
+        with zip_at_version.open(path) as new_file:
+            contents = new_file.read()
+    elif _op == "rename":
+        contents = operation[_op]["newPathname"]
+
+    return OverleafSingleRevision(
+        file_id=path,
+        before_rev=operation["atV"],
+        after_rev=update["toV"],
+        contents=contents,
+        operation=_op,
+    )
 
 
 def create_single_rev(
     browser: RoboBrowser, project_id: str, update: OverleafProjectUpdate
 ) -> OverleafRevision:
     revs = []
-
-    for path in update["pathnames"]:
-        sdiff = get_single_diff(
-            browser, project_id, path, update["fromV"], update["toV"]
-        )
-
-        revs.append(
-            OverleafSingleRevision(
-                file_id=path,
-                before_rev=update["fromV"],
-                after_rev=update["toV"],
-                contents=flatten_diff(sdiff["diff"]),
-                operation="keep",
+    if update["pathnames"]:
+        for path in update["pathnames"]:
+            revs.append(
+                create_single_text_rev(browser, project_id, update, path)
             )
-        )
+    else:
+        # first normalize "rename-after-add" and "delete-after-add"
+        # operations to minimize ZIP downloads
+        flat_ops = {}
+        for operation in reversed(update["project_ops"]):
+            _op = list(operation.keys())[0]
+            path = operation[_op]["pathname"]
+            rev = operation["atV"]
 
-    for operation in reversed(update["project_ops"]):
-        contents = ""
-        _op = list(operation.keys())[0]
-        path = operation[_op]["pathname"]
+            if _op == "add":
+                flat_ops[path] = (_op, "", rev)
+            elif _op == "rename":
+                new_path = operation[_op]["newPathname"]
+                if path not in flat_ops:
+                    # NULL terminator is needed for the special case
+                    # of a file being renamed to something else and
+                    # the old filename is reused
+                    flat_ops[path + "\0"] = (_op, new_path, rev)
+                else:
+                    new_op, _, _ = flat_ops.pop(path)
+                    flat_ops[new_path] = (new_op, "", rev)
+            elif _op == "remove":
+                if path not in flat_ops:
+                    flat_ops[path] = (_op, "", rev)
+                else:
+                    del flat_ops[path]
 
-        if _op == "add":
-            sdiff = get_single_diff(
-                browser, project_id, path, operation["atV"], update["toV"]
+        for path, (_op, new_path, rev) in flat_ops.items():
+            operation = {
+                _op: {
+                    "pathname": path.split("\0")[0],
+                    "newPathname": new_path,
+                },
+                "atV": rev,
+            }
+            revs.append(
+                create_single_binary_rev(
+                    browser, project_id, update, operation
+                )
             )
-            contents = flatten_diff(sdiff["diff"])
-
-        elif _op == "rename":
-            contents = operation[_op]["newPathname"]
-
-        revs.append(
-            OverleafSingleRevision(
-                file_id=path,
-                before_rev=operation["atV"],
-                after_rev=update["toV"],
-                contents=contents,
-                operation=_op,
-            )
-        )
 
     return OverleafRevision(
         authors=update["meta"]["users"],

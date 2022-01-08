@@ -61,10 +61,14 @@ def file_inside_dir(file_path: str):
         Path(head).mkdir(parents=True, exist_ok=True)
 
 
-def write_file(file_path: str, contents: str):
+def write_file(file_path: str, contents: str | bytes):
     file_inside_dir(file_path)
-    with open(file_path, "w+", encoding="utf8") as file_handler:
-        file_handler.write(contents)
+    try:
+        with open(file_path, "w+", encoding="utf8") as file_handler:
+            file_handler.write(contents)
+    except TypeError:
+        with open(file_path, "wb+") as file_handler:
+            file_handler.write(contents)
 
 
 def do_commit(update: OverleafRevision):

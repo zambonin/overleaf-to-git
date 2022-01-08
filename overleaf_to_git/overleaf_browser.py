@@ -7,6 +7,7 @@ from json import dump, load, loads
 from operator import itemgetter
 from os import path
 from tempfile import gettempdir, mkdtemp
+from zipfile import ZipFile
 
 from robobrowser import RoboBrowser
 
@@ -45,19 +46,40 @@ def get_project_updates(
     return history
 
 
-def cache_responses(func):
-    def decorated(*args, **kwargs):
+def get_or_create_temp_dir(proj_id: str) -> str:
+    find_cache_dir = glob(path.join(gettempdir(), proj_id + "-*"))
+    if not find_cache_dir:
+        return mkdtemp(prefix=proj_id + "-")
+    return find_cache_dir[0]
+
+
+def cache_zip_responses(func):
+    def decorated(*args, **kwargs) -> ZipFile:
+        _, proj_id, rev_id = args
+
+        cached_zip_path = "{}.zip".format(rev_id)
+        full_path = path.join(get_or_create_temp_dir(proj_id), cached_zip_path)
+
+        if not path.exists(full_path):
+            data = func(*args, **kwargs)
+            with open(full_path, "wb+") as file:
+                file.write(data)
+
+        return ZipFile(full_path, "r")
+
+    return decorated
+
+
+def cache_json_responses(func):
+    def decorated(*args, **kwargs) -> dict:
         _, proj_id, file_id, old_id, new_id = args
-        find_cache_dir = glob(path.join(gettempdir(), proj_id + "-*"))
-        if not find_cache_dir:
-            cache_dir = mkdtemp(prefix=proj_id + "-")
-        else:
-            cache_dir = find_cache_dir[0]
 
         cached_json_path = "{}_{}_{}.json".format(
             file_id.replace("/", "-"), old_id, new_id
         )
-        full_path = path.join(cache_dir, cached_json_path)
+        full_path = path.join(
+            get_or_create_temp_dir(proj_id), cached_json_path
+        )
 
         if not path.exists(full_path):
             data = func(*args, **kwargs)
@@ -69,7 +91,18 @@ def cache_responses(func):
     return decorated
 
 
-@cache_responses
+@cache_zip_responses
+def get_zip_package(
+    browser: RoboBrowser, project_id: str, rev_id: int
+) -> ZipFile | bytes:
+    zip_url = "https://www.overleaf.com/project/{}/version/{}/zip".format(
+        project_id, rev_id
+    )
+    browser.open(zip_url)
+    return browser.response.content
+
+
+@cache_json_responses
 def get_single_diff(
     browser: RoboBrowser,
     project_id: str,
