@@ -9,6 +9,7 @@ from os import path
 from tempfile import gettempdir, mkdtemp
 from zipfile import ZipFile
 
+from ratelimit import limits, sleep_and_retry, RateLimitException
 from robobrowser import RoboBrowser
 
 from .custom_types import (
@@ -53,56 +54,38 @@ def get_or_create_temp_dir(proj_id: str) -> str:
     return find_cache_dir[0]
 
 
-def cache_zip_responses(func):
-    def decorated(*args, **kwargs) -> ZipFile:
-        _, proj_id, rev_id = args
-
-        cached_zip_path = "{}.zip".format(rev_id)
-        full_path = path.join(get_or_create_temp_dir(proj_id), cached_zip_path)
-
-        if not path.exists(full_path):
-            data = func(*args, **kwargs)
-            with open(full_path, "wb+") as file:
-                file.write(data)
-
-        return ZipFile(full_path, "r")
-
-    return decorated
-
-
-def cache_json_responses(func):
-    def decorated(*args, **kwargs) -> dict:
-        _, proj_id, file_id, old_id, new_id = args
-
-        cached_json_path = "{}_{}_{}.json".format(
-            file_id.replace("/", "-"), old_id, new_id
-        )
-        full_path = path.join(
-            get_or_create_temp_dir(proj_id), cached_json_path
-        )
-
-        if not path.exists(full_path):
-            data = func(*args, **kwargs)
-            with open(full_path, "w+", encoding="utf8") as file:
-                dump(data, file, ensure_ascii=False)
-
-        return load(open(full_path, "r", encoding="utf8"))
-
-    return decorated
-
-
-@cache_zip_responses
 def get_zip_package(
     browser: RoboBrowser, project_id: str, rev_id: int
-) -> ZipFile | bytes:
+) -> ZipFile:
+    cached_zip_path = "{}.zip".format(rev_id)
+    full_path = path.join(get_or_create_temp_dir(project_id), cached_zip_path)
+
+    if not path.exists(full_path):
+        data = get_zip_package_remote(browser, project_id, rev_id)
+        with open(full_path, "wb+") as file:
+            file.write(data)
+
+    return ZipFile(full_path, "r")
+
+
+@sleep_and_retry
+@limits(calls=1, period=30)
+def get_zip_package_remote(
+    browser: RoboBrowser, project_id: str, rev_id: int
+) -> bytes:
     zip_url = "https://www.overleaf.com/project/{}/version/{}/zip".format(
         project_id, rev_id
     )
     browser.open(zip_url)
-    return browser.response.content
+
+    data = browser.response.content
+    if data.startswith(b"Rate limit reached"):
+        # stop for 10 minutes
+        raise RateLimitException("ZIP call rate limit reached", 600)
+
+    return data
 
 
-@cache_json_responses
 def get_single_diff(
     browser: RoboBrowser,
     project_id: str,
@@ -110,6 +93,30 @@ def get_single_diff(
     old_rev_id: int,
     new_rev_id: int,
 ) -> OverleafRawRevision:
+    cached_json_path = "{}_{}_{}.json".format(
+        file_id.replace("/", "-"), old_rev_id, new_rev_id
+    )
+    full_path = path.join(get_or_create_temp_dir(project_id), cached_json_path)
+
+    if not path.exists(full_path):
+        data = get_single_diff_remote(
+            browser, project_id, file_id, old_rev_id, new_rev_id
+        )
+        with open(full_path, "w+", encoding="utf8") as file:
+            dump(data, file, ensure_ascii=False)
+
+    return load(open(full_path, "r", encoding="utf8"))
+
+
+@sleep_and_retry
+@limits(calls=1, period=1)
+def get_single_diff_remote(
+    browser: RoboBrowser,
+    project_id: str,
+    file_id: str,
+    old_rev_id: int,
+    new_rev_id: int,
+) -> bytes:
     diff_url = "https://www.overleaf.com/project/{}/diff".format(project_id)
     browser.open(
         diff_url,
@@ -117,6 +124,7 @@ def get_single_diff(
     )
 
     if browser.response.status_code == 500:
-        return {"diff": [{}]}
+        # stop for 10 minutes
+        raise RateLimitException("JSON call rate limit reached", 600)
 
     return browser.response.json()
