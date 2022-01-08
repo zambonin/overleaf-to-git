@@ -24,8 +24,7 @@ shown on the commit message.
 
 A tool such as `git-filter-repo` may be used to comb through the newly created
 repository and modify it to taste. The aim of this module is to import as much
-content as possible, even if it seems redundant. In the case of old projects
-from ShareLaTeX, the directory structure has to be recreated by hand.
+content as possible, even if it seems redundant.
 
 DISCLAIMER: this project may not adhere to Overleaf's Acceptable Use Policy
 under the notion of "scraping". Nonetheless, the author claims that Overleaf

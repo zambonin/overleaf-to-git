@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import absolute_import
-from operator import attrgetter
 from textwrap import shorten
 
 from robobrowser import RoboBrowser
@@ -16,8 +15,7 @@ from .custom_types import (
 )
 
 from .overleaf_browser import (
-    get_single_diff_v1,
-    get_single_diff_v2,
+    get_single_diff,
     get_project_updates,
 )
 
@@ -92,11 +90,7 @@ def create_project_history(
     for index, update in enumerate(reversed(project.updates)):
         msg = fmt.format(shorten(project.name, width=32), index + 1, changes)
         print(msg, end="\r")
-
-        if "pathnames" not in update.keys():
-            all_revs.append(create_single_rev_v1(browser, project.uid, update))
-        else:
-            all_revs.append(create_single_rev_v2(browser, project.uid, update))
+        all_revs.append(create_single_rev(browser, project.uid, update))
 
     return OverleafProjectWithHistory(project.uid, project.name, all_revs)
 
@@ -113,41 +107,13 @@ def flatten_diff(changes: list[dict[str, str]]) -> str:
     return contents
 
 
-def create_single_rev_v1(
-    browser: RoboBrowser, project_id: str, update: OverleafProjectUpdate
-) -> OverleafRevision:
-    revs = []
-
-    for file_id, ver in update["docs"].items():
-        sdiff = get_single_diff_v1(
-            browser, project_id, file_id, ver["fromV"], ver["toV"]
-        )
-
-        revs.append(
-            OverleafSingleRevision(
-                file_id=file_id,
-                before_rev=ver["fromV"],
-                after_rev=ver["toV"],
-                contents=flatten_diff(sdiff["diff"]),
-                operation="sharelatex",
-            )
-        )
-
-    return OverleafRevision(
-        authors=update["meta"]["users"],
-        before_ts=update["meta"]["start_ts"],
-        after_ts=update["meta"]["end_ts"],
-        file_revs=sorted(revs, key=attrgetter("after_rev"), reverse=True),
-    )
-
-
-def create_single_rev_v2(
+def create_single_rev(
     browser: RoboBrowser, project_id: str, update: OverleafProjectUpdate
 ) -> OverleafRevision:
     revs = []
 
     for path in update["pathnames"]:
-        sdiff = get_single_diff_v2(
+        sdiff = get_single_diff(
             browser, project_id, path, update["fromV"], update["toV"]
         )
 
@@ -167,7 +133,7 @@ def create_single_rev_v2(
         path = operation[_op]["pathname"]
 
         if _op == "add":
-            sdiff = get_single_diff_v2(
+            sdiff = get_single_diff(
                 browser, project_id, path, operation["atV"], update["toV"]
             )
             contents = flatten_diff(sdiff["diff"])
