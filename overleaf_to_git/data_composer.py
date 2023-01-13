@@ -162,7 +162,7 @@ def create_single_rev(
             revs.append(
                 create_single_text_rev(browser, project_id, update, path)
             )
-    else:
+    if update["project_ops"]:
         # first normalize "rename-after-add" and "delete-after-add"
         # operations to minimize ZIP downloads
         flat_ops = {}
@@ -203,8 +203,20 @@ def create_single_rev(
                 )
             )
 
+    authors = update["meta"]["users"]
+    if not authors:
+        # edge case of the sharelatex to overleaf migration
+        authors = [
+            {
+                "first_name": "Overleaf History System",
+                "last_name": "",
+                "email": "overle@f",
+                "id": "1",
+            }
+        ]
+
     return OverleafRevision(
-        authors=update["meta"]["users"],
+        authors=authors,
         before_ts=update["meta"]["start_ts"],
         after_ts=update["meta"]["end_ts"],
         file_revs=revs,
