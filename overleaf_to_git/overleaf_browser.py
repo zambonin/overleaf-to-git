@@ -10,6 +10,7 @@ from tempfile import gettempdir, mkdtemp
 from zipfile import ZipFile
 
 from ratelimit import limits, sleep_and_retry, RateLimitException
+from requests.exceptions import ConnectionError as RequestsConnectionError
 from robobrowser import RoboBrowser
 
 from .custom_types import (
@@ -76,19 +77,22 @@ def get_zip_package(
 
 
 @sleep_and_retry
-@limits(calls=1, period=30)
+@limits(calls=1, period=60)
 def get_zip_package_remote(
     browser: RoboBrowser, project_id: str, rev_id: int
 ) -> bytes:
     zip_url = "https://www.overleaf.com/project/{}/version/{}/zip".format(
         project_id, rev_id
     )
-    browser.open(zip_url)
+    try:
+        browser.open(zip_url)
+    except RequestsConnectionError as exc:
+        raise RateLimitException("Connection aborted", 600) from exc
 
     data = browser.response.content
     if data.startswith(b"Rate limit reached"):
-        # stop for 10 minutes
-        raise RateLimitException("ZIP call rate limit reached", 600)
+        # stop for 5 minutes
+        raise RateLimitException("ZIP call rate limit reached", 300)
 
     return data
 
@@ -131,7 +135,7 @@ def get_single_diff_remote(
     )
 
     if browser.response.status_code == 500:
-        # stop for 10 minutes
-        raise RateLimitException("JSON call rate limit reached", 600)
+        # stop for 1 minute
+        raise RateLimitException("JSON call rate limit reached", 60)
 
     return browser.response.json()
