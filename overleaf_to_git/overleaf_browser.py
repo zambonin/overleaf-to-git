@@ -35,6 +35,10 @@ def get_project_updates(
     history = []
 
     browser.open(url.format(_id), params={"min_count": count})
+    if browser.response.status_code == 403:
+        # forbidden to access update history
+        return history
+
     data = browser.response.json()
     history += data["updates"]
 

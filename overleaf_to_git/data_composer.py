@@ -27,13 +27,15 @@ def display_projects(projects: list[OverleafRawProject]) -> str:
     output += line_fmt.format("", "Project name", "Owner", "Last update")
 
     for index, project in enumerate(projects):
-        if project["accessLevel"] == "readOnly":
-            continue
-        email = project["owner"]["email"]
+        if not project.get("lastUpdatedBy", 1):
+            email = "[!]"
+        else:
+            email = project["owner"]["email"]
+            email = (email[:18] + "...") if len(email) > 20 else email
         output += line_fmt.format(
             index + 1,
             shorten(project["name"], width=34, placeholder="..."),
-            (email[:18] + "...") if len(email) > 20 else email,
+            email,
             project["lastUpdated"][:10],
         )
 
