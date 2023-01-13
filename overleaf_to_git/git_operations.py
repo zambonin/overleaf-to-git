@@ -99,7 +99,9 @@ def do_commit(update: OverleafRevision):
 
 
 def create_repo(project: OverleafProjectWithHistory):
-    repo_path = mkdtemp(prefix="git-{}-".format(project.name))
+    stamp = datetime.now().strftime("%Y%m%d-%H%m%s")
+    name = "overleaf-git-{}-{}-".format(project.name, stamp)
+    repo_path = mkdtemp(prefix=name)
     chdir(repo_path)
     with Popen("git init".split(), stdout=PIPE) as cmd:
         cmd.communicate()

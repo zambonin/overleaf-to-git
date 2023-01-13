@@ -54,9 +54,10 @@ def get_project_updates(
 
 
 def get_or_create_temp_dir(proj_id: str) -> str:
-    find_cache_dir = glob(path.join(gettempdir(), proj_id + "-*"))
+    name = "overleaf-updates-{}-".format(proj_id)
+    find_cache_dir = glob(path.join(gettempdir(), name + "*"))
     if not find_cache_dir:
-        return mkdtemp(prefix=proj_id + "-")
+        return mkdtemp(prefix=name)
     return find_cache_dir[0]
 
 
