@@ -20,9 +20,11 @@ from .custom_types import (
 
 
 def get_project_list(browser: RoboBrowser) -> list[OverleafRawProject]:
-    browser.open("https://www.overleaf.com/project")
-    raw_json = browser.find("meta", attrs={"name": "ol-projects"})["content"]
-    dict_json = loads(raw_json)
+    projects_url = "https://www.overleaf.com/project"
+    tag_content = "ol-prefetchedProjectsBlob"
+    browser.open(projects_url)
+    raw_json = browser.find("meta", attrs={"name": tag_content})["content"]
+    dict_json = loads(raw_json)["projects"]
     return sorted(dict_json, key=itemgetter("lastUpdated"), reverse=True)
 
 
