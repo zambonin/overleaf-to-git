@@ -17,6 +17,11 @@ from .custom_types import (
 )
 
 
+def author_identity(author: OverleafAuthor) -> tuple[str, str]:
+    name = "{} {}".format(author["first_name"], author.get("last_name", "")).strip()
+    return name, author["email"]
+
+
 def parse_author(first_author: OverleafAuthor) -> str:
     if "last_name" in first_author.keys() and first_author["last_name"]:
         return "{} {} <{}>".format(
@@ -92,7 +97,10 @@ def do_commit(update: OverleafRevision):
         "--message={}".format(parse_message(update.authors, update.file_revs)),
     )
 
+    name, email = author_identity(update.authors[0])
     env = environ.copy()
+    env["GIT_COMMITTER_NAME"] = name
+    env["GIT_COMMITTER_EMAIL"] = email
     env["GIT_COMMITTER_DATE"] = parse_date(update.after_ts)
     with Popen(commit_line, stdout=PIPE, env=env) as cmd:
         cmd.communicate()
