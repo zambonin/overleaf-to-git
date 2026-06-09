@@ -1,33 +1,75 @@
-A Python module that translates Overleaf's project history into Git
-repositories. It uses Overleaf's internal JSON endpoints to obtain the correct
-diffs.
+overleaf-to-git
+===============
 
-The module will create a temporary directory with the project file tree and Git
-commit history. To convert Overleaf projects into Git repositories, simply use
-the command `python -m overleaf_to_git`. The module requires the user to be
-logged in a real browser, currently Firefox but easily configurable to be
-another browser supported by `browser_cookie3`. One may choose multiple
-projects to be converted. The module will show progress as it downloads
-information and creates commits.
+Archive an Overleaf project's *full edit history* into a local Git repository,
+one commit per Overleaf revision, preserving authors, co-authors, and the
+original timestamps. Overleaf offers no supported way to export this history,
+so the tool reconstructs it from the same JSON endpoints the "History" tab uses
+in a browser.
 
-The whole ordeal takes some time to finish, since every revision of every file
-inside the projects is downloaded from Overleaf's servers. However, the raw
-files are stored in the operating system's temporary directory to allow for
-resumed execution at no cost to Overleaf's servers if anything goes wrong.
+It works against overleaf.com and against a self-hosted Overleaf/ShareLaTeX
+instance (set --base-url), which makes it handy when migrating projects to your
+own server.
 
-Binary files are obtained via the download of old versions as ZIP files, with
-care taken so that the minimal number of ZIP files are downloaded. Furthermore,
-files opened on Overleaf may be marked as modified even though there are no
-apparent modifications. This is likely the result of a user rapidly adding and
-removing content, and will be shown on the commit message.
 
-A tool such as `git-filter-repo` may be used to comb through the newly created
-repository and modify it to taste. The aim of this module is to import as much
-content as possible, even if it seems redundant.
+Authentication
+--------------
 
-DISCLAIMER: this project may not adhere to Overleaf's Acceptable Use Policy
-under the notion of "scraping". Nonetheless, the author claims that Overleaf
-does not provide a "publicly supported interface" to archive your project
-history, even to paid users. (This project partially simulates a user clicking
-through all revisions in the project's "history" tab, and saving the output
-into a HAR file, using the network monitor of a common browser.)
+No password is sent and no browser cookie database is read by default. Copy your
+session cookie once from your browser's developer tools (Application -> Cookies),
+the value named `overleaf_session2` on overleaf.com, and pass it in:
+
+    export OVERLEAF_SESSION='s%3A...'        # the cookie value
+    python -m overleaf_to_git --list
+
+Alternatives:
+
+  * `--from-browser firefox` imports cookies automatically (needs
+    `browser_cookie3`).
+  * Self-hosted instances usually name the cookie `sharelatex.sid`; pass
+    `--base-url https://overleaf.example.org --cookie-name sharelatex.sid`.
+
+
+Usage
+-----
+
+    # list projects (newest first) and their owners
+    python -m overleaf_to_git --list
+
+    # archive projects 1 to 4 and 7, non-interactively
+    python -m overleaf_to_git --projects "1-4 7"
+
+    # omit --projects to pick interactively from the printed list
+
+Each chosen project becomes a Git repository under --output-dir, which defaults
+to `~/.local/share/overleaf-to-git/` ($XDG_DATA_HOME). The repositories are the
+product, so they live in the data directory and never in the cache, which
+anything is entitled to delete.
+
+
+Responsible use & caching
+-------------------------
+
+Requests are rate limited (diffs at 1/second, version ZIPs at 1/2 minutes).
+
+Every downloaded diff and ZIP is cached under `--cache-dir` (default
+`~/.cache/overleaf-to-git/<project-id>/`), so an interrupted archive resumes
+without touching Overleaf's servers again for anything it already fetched. Keep
+the cache around until you are done.
+
+Binary files are reconstructed from version ZIPs, downloading the minimal set of
+ZIPs by normalizing add/rename/remove sequences first.
+
+
+Notes
+-----
+
+Files opened on Overleaf can be marked "modified" with no visible change (a user
+rapidly adding then removing content); such revisions are still committed (empty
+if needed) and noted in the commit message. Use `git-filter-repo` afterwards if
+you want to prune or rewrite the imported history.
+
+DISCLAIMER: this may not align with Overleaf's Acceptable Use Policy regarding
+"scraping". The author's position is that Overleaf provides no supported
+interface to archive your own project history; this tool merely automates what a
+user could do by clicking through every revision in the History tab.

@@ -2,9 +2,7 @@
 # pylint: disable=C0209
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
-from tempfile import mkdtemp
 from textwrap import shorten
 
 import pygit2
@@ -94,17 +92,32 @@ def do_commit(
     repo.create_commit("HEAD", author, committer, message, tree, parents)
 
 
-def create_repo(project: OverleafProjectWithHistory) -> Path:
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    name = "overleaf-git-{}-{}-".format(project.name, stamp)
-    repo_path = Path(mkdtemp(prefix=name))
+def _sanitize(name: str) -> str:
+    cleaned = "".join(c if c.isalnum() or c in "._-" else "-" for c in name)
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned.strip("-_. ") or "overleaf-project"
+
+
+def _unique_path(output_dir: Path, name: str) -> Path:
+    candidate, suffix = output_dir / name, 1
+    while candidate.exists():
+        suffix += 1
+        candidate = output_dir / "{}-{}".format(name, suffix)
+    return candidate
+
+
+def create_repo(project: OverleafProjectWithHistory, output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    repo_path = _unique_path(output_dir, _sanitize(project.name))
     repo = pygit2.init_repository(str(repo_path))
     index = repo.index
 
-    fmt = "[{:>36}]  {:>4}/{:>4} commits"
+    fmt = "[{:>32}]  {:>4}/{:>4} commits"
     total_commits = len(project.updates)
     for index_i, update in enumerate(project.updates):
-        msg = fmt.format(shorten(str(repo_path), width=32), index_i + 1, total_commits)
+        msg = fmt.format(shorten(project.name, width=32), index_i + 1, total_commits)
         print(msg, end="\r")
         do_commit(repo, index, update)
 

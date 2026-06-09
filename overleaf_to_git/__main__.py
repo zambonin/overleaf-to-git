@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=C0413
+from __future__ import annotations
 
-from __future__ import absolute_import
-
+import argparse
+from os import environ
 from pathlib import Path
-from tempfile import gettempdir
 
-from .client import OverleafClient
+from .client import (
+    DEFAULT_BASE_URL,
+    DEFAULT_COOKIE_NAME,
+    DEFAULT_USER_AGENT,
+    OverleafClient,
+)
 from .data_composer import (
     create_project_history,
     create_projects,
@@ -17,35 +21,129 @@ from .data_composer import (
 from .git_operations import create_repo
 from .overleaf_browser import get_project_list
 
+DEFAULT_CACHE_DIR = (
+    Path(environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "overleaf-to-git"
+)
+DEFAULT_OUTPUT_DIR = (
+    Path(environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    / "overleaf-to-git"
+)
 
-def process_input(limit: int) -> list[int]:
-    exceed, sequence = True, []
-    while exceed:
-        _str = input("Project indices to be processed (e.g. 1-4 7): ")
-        sequence = create_sequences(_str)
-        exceed = any(num > limit for num in sequence) or not sequence
-    return sequence
+
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="overleaf-to-git",
+        description="Archive Overleaf project history into Git repositories.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=environ.get("OVERLEAF_URL", DEFAULT_BASE_URL),
+        help="Overleaf base URL (default: %(default)s); set your domain for "
+        "a self-hosted instance.",
+    )
+
+    auth = parser.add_argument_group("authentication")
+    auth.add_argument(
+        "--session",
+        default=environ.get("OVERLEAF_SESSION"),
+        help="session cookie value, copied from your browser "
+        "(or via env OVERLEAF_SESSION).",
+    )
+    auth.add_argument(
+        "--cookie-name",
+        default=DEFAULT_COOKIE_NAME,
+        help="session cookie name (default: %(default)s; self-hosted "
+        "instances often use sharelatex.sid).",
+    )
+    auth.add_argument(
+        "--from-browser",
+        metavar="BROWSER",
+        default=None,
+        help="import cookies from a browser via browser_cookie3 "
+        "(e.g. firefox, chrome).",
+    )
+
+    parser.add_argument(
+        "--projects",
+        metavar="SPEC",
+        default=None,
+        help='non-interactive selection, e.g. "1-4 7"; omit to choose interactively.',
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="directory to create the Git repositories in (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=DEFAULT_CACHE_DIR,
+        help="persistent download cache; makes runs resumable (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--user-agent",
+        default=DEFAULT_USER_AGENT,
+        help="HTTP User-Agent header.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="list available projects and exit.",
+    )
+    return parser.parse_args(argv)
 
 
-CLIENT = OverleafClient(cache_dir=Path(gettempdir()) / "overleaf-to-git")
-CLIENT.load_browser_cookies("firefox")
+def build_client(args: argparse.Namespace) -> OverleafClient:
+    client = OverleafClient(
+        args.base_url, cache_dir=args.cache_dir, user_agent=args.user_agent
+    )
+    if args.from_browser:
+        client.load_browser_cookies(args.from_browser)
+    if args.session:
+        client.set_session_cookie(args.session, args.cookie_name)
+    if not client.authenticated():
+        raise SystemExit(
+            "No credentials. Pass --session (or set OVERLEAF_SESSION) with the "
+            "session cookie from your browser, or --from-browser firefox."
+        )
+    return client
 
-ALL_PROJECTS = get_project_list(CLIENT)
-print(display_projects(ALL_PROJECTS))
 
-PROJ_QNT = len(ALL_PROJECTS)
-try:
-    INDICES = process_input(PROJ_QNT)
-except KeyboardInterrupt as e:
-    print("\033[2K", end="\r")
-    raise SystemExit("Program aborted by user!") from e
-finally:
-    for _ in range(PROJ_QNT + 5):
-        print("\033[1A\033[2K", end="\r")
+def choose_indices(total: int) -> list[int]:
+    while True:
+        try:
+            raw = input("Project indices to archive (e.g. 1-4 7): ")
+        except (EOFError, KeyboardInterrupt) as exc:
+            raise SystemExit("\nAborted by user.") from exc
+        sequence = create_sequences(raw)
+        if sequence and not any(num > total for num in sequence):
+            return sequence
+        print("Invalid selection; try again.")
 
-PROJECTS = create_projects(CLIENT, ALL_PROJECTS, INDICES)
-for index, project in enumerate(PROJECTS):
-    history = create_project_history(CLIENT, project)
-    print("\033[2K", end="\r")
-    create_repo(history)
-    print("\033[2K", end="\r")
+
+def main(argv=None) -> None:
+    args = parse_args(argv)
+    client = build_client(args)
+
+    all_projects = get_project_list(client)
+    print(display_projects(all_projects), end="")
+    if args.list or not all_projects:
+        return
+
+    if args.projects is not None:
+        indices = create_sequences(args.projects)
+        if not indices or any(num > len(all_projects) for num in indices):
+            raise SystemExit("Invalid --projects selection.")
+    else:
+        indices = choose_indices(len(all_projects))
+
+    projects = create_projects(client, all_projects, indices)
+    for project in projects:
+        history = create_project_history(client, project)
+        repo = create_repo(history, args.output_dir)
+        print("\033[2K\rArchived {!r} -> {}".format(project.name, repo))
+
+
+if __name__ == "__main__":
+    main()

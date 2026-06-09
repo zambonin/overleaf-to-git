@@ -65,7 +65,7 @@ class OverleafClient:
         try:
             import browser_cookie3
         except ImportError as exc:
-            raise SystemExit("browser_cookie3 is required to import cookies") from exc
+            raise SystemExit("--from-browser requires browser_cookie3") from exc
         loader = getattr(browser_cookie3, browser, None)
         if loader is None:
             raise SystemExit("unsupported browser for cookie import: " + browser)

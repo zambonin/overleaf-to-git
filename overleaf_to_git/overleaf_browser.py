@@ -24,7 +24,7 @@ def get_project_list(client: OverleafClient) -> list[OverleafRawProject]:
     if raw_json is None:
         raise SystemExit(
             "Could not read the project list. The session is probably not "
-            "authenticated."
+            "authenticated -- check --session / --from-browser and --base-url."
         )
     projects = loads(raw_json)["projects"]
     return sorted(projects, key=itemgetter("lastUpdated"), reverse=True)
