@@ -86,6 +86,7 @@ def do_commit(update: OverleafRevision):
     commit_line = (
         "git",
         "commit",
+        "--allow-empty",
         "--date={}".format(parse_date(update.before_ts)),
         "--author={}".format(parse_author(update.authors[0])),
         "--message={}".format(parse_message(update.authors, update.file_revs)),
@@ -95,6 +96,8 @@ def do_commit(update: OverleafRevision):
     env["GIT_COMMITTER_DATE"] = parse_date(update.after_ts)
     with Popen(commit_line, stdout=PIPE, env=env) as cmd:
         cmd.communicate()
+    if cmd.returncode:
+        raise RuntimeError("git commit failed for revision")
 
 
 def create_repo(project: OverleafProjectWithHistory):
