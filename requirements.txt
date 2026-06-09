@@ -1,3 +1,4 @@
 requests
 browser_cookie3
 ratelimit
+pygit2

@@ -1,125 +1,113 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=C0209
+from __future__ import annotations
 
-from __future__ import absolute_import, division
 from datetime import datetime
-from os import chdir, environ, path
 from pathlib import Path
-from subprocess import Popen, PIPE
 from tempfile import mkdtemp
 from textwrap import shorten
+
+import pygit2
 
 from .custom_types import (
     OverleafAuthor,
     OverleafProjectWithHistory,
     OverleafRevision,
-    OverleafSingleRevision,
 )
+
+_FILEMODE_BLOB = 0o100644
 
 
 def author_identity(author: OverleafAuthor) -> tuple[str, str]:
-    name = "{} {}".format(author["first_name"], author.get("last_name", "")).strip()
-    return name, author["email"]
+    name = "{} {}".format(
+        author.get("first_name", ""), author.get("last_name", "")
+    ).strip()
+    return name or "Overleaf History System", author.get("email", "overle@f")
 
 
-def parse_author(first_author: OverleafAuthor) -> str:
-    if "last_name" in first_author.keys() and first_author["last_name"]:
-        return "{} {} <{}>".format(
-            first_author["first_name"],
-            first_author["last_name"],
-            first_author["email"],
-        )
-    return "{} <{}>".format(first_author["first_name"], first_author["email"])
+def parse_author(author: OverleafAuthor) -> str:
+    name, email = author_identity(author)
+    return "{} <{}>".format(name, email)
 
 
-def parse_date(stamp: int) -> str:
-    return datetime.fromtimestamp(stamp / 1000).astimezone().strftime("%c %z")
-
-
-def parse_message(
-    authors: list[OverleafAuthor], revs: list[OverleafSingleRevision]
-) -> str:
-    message = "overleaf_to_git: "
-    touched = {}
-    for rev in revs:
-        touched[rev.file_id] = "update {} from r{} to r{}\n".format(
+def parse_message(authors: list[OverleafAuthor], revs) -> str:
+    touched = {
+        rev.file_id: "update {} from r{} to r{}\n".format(
             rev.file_id, rev.before_rev, rev.after_rev
         )
-
-    for line in touched.values():
-        message += line
-
+        for rev in revs
+    }
+    message = "overleaf_to_git: " + "".join(touched.values())
     if len(authors) > 1:
-        message += "\n"
-        message += "".join(
+        message += "\n" + "".join(
             "\nCo-authored-by: {}".format(parse_author(coauthor))
             for coauthor in authors[1:]
         )
-
     return message + "\n"
 
 
-def file_inside_dir(file_path: str):
-    head, _ = path.split(file_path)
-    if head:
-        Path(head).mkdir(parents=True, exist_ok=True)
+def _signature(author: OverleafAuthor, stamp_ms: int) -> pygit2.Signature:
+    name, email = author_identity(author)
+    # Overleaf timestamps have no timezone; UTC keeps commit IDs reproducible.
+    return pygit2.Signature(name, email, int(stamp_ms // 1000), 0)
 
 
-def write_file(file_path: str, contents: str | bytes):
-    file_inside_dir(file_path)
+def _index_remove(index: pygit2.Index, path: str) -> None:
     try:
-        with open(file_path, "w+", encoding="utf8") as file_handler:
-            file_handler.write(contents)
-    except TypeError:
-        with open(file_path, "wb+") as file_handler:
-            file_handler.write(contents)
+        index.remove(path)
+    except (KeyError, OSError, pygit2.GitError):
+        pass
 
 
-def do_commit(update: OverleafRevision):
+def _index_rename(index: pygit2.Index, old: str, new: str) -> None:
+    try:
+        entry = index[old]
+    except KeyError:
+        return
+    index.remove(old)
+    index.add(pygit2.IndexEntry(new, entry.id, entry.mode))
+
+
+def do_commit(
+    repo: pygit2.Repository, index: pygit2.Index, update: OverleafRevision
+) -> None:
     for rev in update.file_revs:
         if rev.operation == "remove":
-            command = ["git", "rm", "-f", rev.file_id]
+            _index_remove(index, rev.file_id)
         elif rev.operation == "rename":
-            file_inside_dir(rev.contents)
-            command = ["git", "mv", rev.file_id, rev.contents]
+            _index_rename(index, rev.file_id, rev.contents)
         else:
-            write_file(rev.file_id, rev.contents)
-            command = ["git", "add", "-f", rev.file_id]
-        with Popen(command, stdout=PIPE) as cmd:
-            cmd.communicate()
+            data = (
+                rev.contents.encode("utf8")
+                if isinstance(rev.contents, str)
+                else rev.contents
+            )
+            blob = repo.create_blob(data)
+            index.add(pygit2.IndexEntry(rev.file_id, blob, _FILEMODE_BLOB))
 
-    commit_line = (
-        "git",
-        "commit",
-        "--allow-empty",
-        "--date={}".format(parse_date(update.before_ts)),
-        "--author={}".format(parse_author(update.authors[0])),
-        "--message={}".format(parse_message(update.authors, update.file_revs)),
-    )
-
-    name, email = author_identity(update.authors[0])
-    env = environ.copy()
-    env["GIT_COMMITTER_NAME"] = name
-    env["GIT_COMMITTER_EMAIL"] = email
-    env["GIT_COMMITTER_DATE"] = parse_date(update.after_ts)
-    with Popen(commit_line, stdout=PIPE, env=env) as cmd:
-        cmd.communicate()
-    if cmd.returncode:
-        raise RuntimeError("git commit failed for revision")
+    index.write()
+    tree = index.write_tree()
+    author = _signature(update.authors[0], update.before_ts)
+    committer = _signature(update.authors[0], update.after_ts)
+    message = parse_message(update.authors, update.file_revs)
+    parents = [] if repo.head_is_unborn else [repo.head.target]
+    repo.create_commit("HEAD", author, committer, message, tree, parents)
 
 
-def create_repo(project: OverleafProjectWithHistory):
+def create_repo(project: OverleafProjectWithHistory) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     name = "overleaf-git-{}-{}-".format(project.name, stamp)
-    repo_path = mkdtemp(prefix=name)
-    chdir(repo_path)
-    with Popen("git init".split(), stdout=PIPE) as cmd:
-        cmd.communicate()
+    repo_path = Path(mkdtemp(prefix=name))
+    repo = pygit2.init_repository(str(repo_path))
+    index = repo.index
 
     fmt = "[{:>36}]  {:>4}/{:>4} commits"
     total_commits = len(project.updates)
-
-    for ind, update in enumerate(project.updates):
-        msg = fmt.format(shorten(repo_path, width=32), ind + 1, total_commits)
+    for index_i, update in enumerate(project.updates):
+        msg = fmt.format(shorten(str(repo_path), width=32), index_i + 1, total_commits)
         print(msg, end="\r")
-        do_commit(update)
+        do_commit(repo, index, update)
+
+    if not repo.head_is_unborn:
+        repo.reset(repo.head.target, pygit2.GIT_RESET_HARD)
+    return repo_path
