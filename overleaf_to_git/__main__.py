@@ -4,14 +4,10 @@
 
 from __future__ import absolute_import
 
-from browser_cookie3 import firefox as get_cookies_from_browser
-from requests import session
-import werkzeug
+from pathlib import Path
+from tempfile import gettempdir
 
-werkzeug.cached_property = werkzeug.utils.cached_property
-from robobrowser import RoboBrowser
-
-
+from .client import OverleafClient
 from .data_composer import (
     create_project_history,
     create_projects,
@@ -31,16 +27,10 @@ def process_input(limit: int) -> list[int]:
     return sequence
 
 
-SESSION = session()
-SESSION.cookies = get_cookies_from_browser(domain_name="overleaf.com")
-BROWSER = RoboBrowser(
-    history=True,
-    parser="html.parser",
-    user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:95.0) Gecko/20100101 Firefox/95.0",
-    session=SESSION,
-)
+CLIENT = OverleafClient(cache_dir=Path(gettempdir()) / "overleaf-to-git")
+CLIENT.load_browser_cookies("firefox")
 
-ALL_PROJECTS = get_project_list(BROWSER)
+ALL_PROJECTS = get_project_list(CLIENT)
 print(display_projects(ALL_PROJECTS))
 
 PROJ_QNT = len(ALL_PROJECTS)
@@ -53,9 +43,9 @@ finally:
     for _ in range(PROJ_QNT + 5):
         print("\033[1A\033[2K", end="\r")
 
-PROJECTS = create_projects(BROWSER, ALL_PROJECTS, INDICES)
+PROJECTS = create_projects(CLIENT, ALL_PROJECTS, INDICES)
 for index, project in enumerate(PROJECTS):
-    history = create_project_history(BROWSER, project)
+    history = create_project_history(CLIENT, project)
     print("\033[2K", end="\r")
     create_repo(history)
     print("\033[2K", end="\r")

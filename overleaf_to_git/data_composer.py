@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 
-from __future__ import absolute_import
 from textwrap import shorten
 
-from robobrowser import RoboBrowser
-
+from .client import OverleafClient
 from .custom_types import (
     OverleafProject,
     OverleafProjectUpdate,
@@ -13,7 +12,6 @@ from .custom_types import (
     OverleafRevision,
     OverleafSingleRevision,
 )
-
 from .overleaf_browser import (
     get_single_diff,
     get_project_updates,
@@ -64,7 +62,7 @@ def create_sequences(string: str) -> list[int]:
 
 
 def create_projects(
-    browser: RoboBrowser,
+    client: OverleafClient,
     projects: list[OverleafRawProject],
     indices: list[int],
 ) -> list[OverleafProject]:
@@ -78,14 +76,14 @@ def create_projects(
         print(msg, end="\r")
 
         chosen_projects.append(
-            OverleafProject(_id, name, get_project_updates(browser, _id))
+            OverleafProject(_id, name, get_project_updates(client, _id))
         )
 
     return chosen_projects
 
 
 def create_project_history(
-    browser: RoboBrowser, project: OverleafProject
+    client: OverleafClient, project: OverleafProject
 ) -> OverleafProjectWithHistory:
     fmt = "[{:>36}]  {:>4}/{:>4} individual revisions"
     changes = len(project.updates)
@@ -94,19 +92,19 @@ def create_project_history(
     for index, update in enumerate(reversed(project.updates)):
         msg = fmt.format(shorten(project.name, width=32), index + 1, changes)
         print(msg, end="\r")
-        all_revs.append(create_single_rev(browser, project.uid, update))
+        all_revs.append(create_single_rev(client, project.uid, update))
 
     return OverleafProjectWithHistory(project.uid, project.name, all_revs)
 
 
 def create_single_text_rev(
-    browser: RoboBrowser,
+    client: OverleafClient,
     project_id: str,
     update: OverleafProjectUpdate,
     path: str,
 ) -> OverleafSingleRevision:
     keyed_diff = get_single_diff(
-        browser, project_id, path, update["fromV"], update["toV"]
+        client, project_id, path, update["fromV"], update["toV"]
     )
 
     flat_diff = ""
@@ -128,7 +126,7 @@ def create_single_text_rev(
 
 
 def create_single_binary_rev(
-    browser: RoboBrowser,
+    client: OverleafClient,
     project_id: str,
     update: OverleafProjectUpdate,
     operation: dict[str, dict[str, str] | int],
@@ -138,7 +136,7 @@ def create_single_binary_rev(
 
     contents = ""
     if _op == "add":
-        zip_at_version = get_zip_package(browser, project_id, update["toV"])
+        zip_at_version = get_zip_package(client, project_id, update["toV"])
         with zip_at_version.open(path) as new_file:
             contents = new_file.read()
     elif _op == "rename":
@@ -154,12 +152,12 @@ def create_single_binary_rev(
 
 
 def create_single_rev(
-    browser: RoboBrowser, project_id: str, update: OverleafProjectUpdate
+    client: OverleafClient, project_id: str, update: OverleafProjectUpdate
 ) -> OverleafRevision:
     revs = []
     if update["pathnames"]:
         for path in update["pathnames"]:
-            revs.append(create_single_text_rev(browser, project_id, update, path))
+            revs.append(create_single_text_rev(client, project_id, update, path))
     if update["project_ops"]:
         flat_ops = {}
         for operation in reversed(update["project_ops"]):
@@ -190,9 +188,7 @@ def create_single_rev(
                 },
                 "atV": rev,
             }
-            revs.append(
-                create_single_binary_rev(browser, project_id, update, operation)
-            )
+            revs.append(create_single_binary_rev(client, project_id, update, operation))
 
     authors = update["meta"]["users"]
     if not authors:

@@ -1,6 +1,6 @@
 A Python module that translates Overleaf's project history into Git
-repositories. It uses RoboBrowser to navigate around the site and obtain the
-correct diffs.
+repositories. It uses Overleaf's internal JSON endpoints to obtain the correct
+diffs.
 
 The module will create a temporary directory with the project file tree and Git
 commit history. To convert Overleaf projects into Git repositories, simply use
