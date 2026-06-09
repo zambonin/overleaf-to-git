@@ -1,0 +1,27 @@
+[project]
+name = "overleaf-to-git"
+version = "2.0.0"
+description = "Archive Overleaf project history into Git repositories."
+readme = { file = "README", content-type = "text/plain" }
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "Gustavo Zambonin" }]
+dependencies = [
+    "requests>=2.25",
+    "ratelimit>=2.2",
+    "pygit2>=1.14",
+]
+
+[project.optional-dependencies]
+browser = ["browser-cookie3>=0.19"]
+
+[project.scripts]
+overleaf-to-git = "overleaf_to_git.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["overleaf_to_git"]

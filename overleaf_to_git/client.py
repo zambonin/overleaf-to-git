@@ -65,7 +65,10 @@ class OverleafClient:
         try:
             import browser_cookie3
         except ImportError as exc:
-            raise SystemExit("--from-browser requires browser_cookie3") from exc
+            raise SystemExit(
+                "--from-browser needs the optional dependency; install with "
+                "`uv sync --extra browser` or `pip install browser_cookie3`."
+            ) from exc
         loader = getattr(browser_cookie3, browser, None)
         if loader is None:
             raise SystemExit("unsupported browser for cookie import: " + browser)

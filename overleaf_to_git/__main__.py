@@ -59,8 +59,8 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--from-browser",
         metavar="BROWSER",
         default=None,
-        help="import cookies from a browser via browser_cookie3 "
-        "(e.g. firefox, chrome).",
+        help="optional: import cookies from a browser via browser_cookie3 "
+        "(e.g. firefox, chrome). Requires the 'browser' extra.",
     )
 
     parser.add_argument(

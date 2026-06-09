@@ -12,6 +12,20 @@ instance (set --base-url), which makes it handy when migrating projects to your
 own server.
 
 
+Install
+-------
+
+The project is managed with `uv` (https://docs.astral.sh/uv/):
+
+    uv sync                      # core install
+    uv sync --extra browser      # also enable --from-browser cookie import
+
+Run it as a module or via the installed script:
+
+    uv run overleaf-to-git --help
+    uv run python -m overleaf_to_git --help
+
+
 Authentication
 --------------
 
@@ -20,12 +34,12 @@ session cookie once from your browser's developer tools (Application -> Cookies)
 the value named `overleaf_session2` on overleaf.com, and pass it in:
 
     export OVERLEAF_SESSION='s%3A...'        # the cookie value
-    python -m overleaf_to_git --list
+    uv run overleaf-to-git --list
 
 Alternatives:
 
-  * `--from-browser firefox` imports cookies automatically (needs
-    `browser_cookie3`).
+  * `--from-browser firefox` imports cookies automatically (needs the optional
+    `browser_cookie3` dependency; install with `uv sync --extra browser`).
   * Self-hosted instances usually name the cookie `sharelatex.sid`; pass
     `--base-url https://overleaf.example.org --cookie-name sharelatex.sid`.
 
@@ -34,10 +48,10 @@ Usage
 -----
 
     # list projects (newest first) and their owners
-    python -m overleaf_to_git --list
+    uv run overleaf-to-git --list
 
     # archive projects 1 to 4 and 7, non-interactively
-    python -m overleaf_to_git --projects "1-4 7"
+    uv run overleaf-to-git --projects "1-4 7"
 
     # omit --projects to pick interactively from the printed list
 
