@@ -37,7 +37,6 @@ def get_project_updates(
 
     browser.open(url.format(_id), params={"min_count": count})
     if browser.response.status_code == 403:
-        # forbidden to access update history
         return history
 
     data = browser.response.json()
@@ -62,9 +61,7 @@ def get_or_create_temp_dir(proj_id: str) -> str:
     return find_cache_dir[0]
 
 
-def get_zip_package(
-    browser: RoboBrowser, project_id: str, rev_id: int
-) -> ZipFile:
+def get_zip_package(browser: RoboBrowser, project_id: str, rev_id: int) -> ZipFile:
     cached_zip_path = "{}.zip".format(rev_id)
     full_path = path.join(get_or_create_temp_dir(project_id), cached_zip_path)
 
@@ -78,9 +75,7 @@ def get_zip_package(
 
 @sleep_and_retry
 @limits(calls=1, period=60)
-def get_zip_package_remote(
-    browser: RoboBrowser, project_id: str, rev_id: int
-) -> bytes:
+def get_zip_package_remote(browser: RoboBrowser, project_id: str, rev_id: int) -> bytes:
     zip_url = "https://www.overleaf.com/project/{}/version/{}/zip".format(
         project_id, rev_id
     )
@@ -91,7 +86,6 @@ def get_zip_package_remote(
 
     data = browser.response.content
     if data.startswith(b"Rate limit reached"):
-        # stop for 5 minutes
         raise RateLimitException("ZIP call rate limit reached", 300)
 
     return data
@@ -135,7 +129,6 @@ def get_single_diff_remote(
     )
 
     if browser.response.status_code == 500:
-        # stop for 1 minute
         raise RateLimitException("JSON call rate limit reached", 60)
 
     return browser.response.json()

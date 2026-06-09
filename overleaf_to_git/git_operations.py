@@ -41,7 +41,6 @@ def parse_message(
             rev.file_id, rev.before_rev, rev.after_rev
         )
 
-    # removes duplicated entries mentioning the same file
     for line in touched.values():
         message += line
 
@@ -99,7 +98,7 @@ def do_commit(update: OverleafRevision):
 
 
 def create_repo(project: OverleafProjectWithHistory):
-    stamp = datetime.now().strftime("%Y%m%d-%H%m%s")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     name = "overleaf-git-{}-{}-".format(project.name, stamp)
     repo_path = mkdtemp(prefix=name)
     chdir(repo_path)

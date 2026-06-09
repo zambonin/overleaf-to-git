@@ -51,7 +51,6 @@ except KeyboardInterrupt as e:
     raise SystemExit("Program aborted by user!") from e
 finally:
     for _ in range(PROJ_QNT + 5):
-        # clear one line at a time for every visible project plus input questions
         print("\033[1A\033[2K", end="\r")
 
 PROJECTS = create_projects(BROWSER, ALL_PROJECTS, INDICES)

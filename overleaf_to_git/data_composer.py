@@ -159,12 +159,8 @@ def create_single_rev(
     revs = []
     if update["pathnames"]:
         for path in update["pathnames"]:
-            revs.append(
-                create_single_text_rev(browser, project_id, update, path)
-            )
+            revs.append(create_single_text_rev(browser, project_id, update, path))
     if update["project_ops"]:
-        # first normalize "rename-after-add" and "delete-after-add"
-        # operations to minimize ZIP downloads
         flat_ops = {}
         for operation in reversed(update["project_ops"]):
             _op = list(operation.keys())[0]
@@ -176,9 +172,6 @@ def create_single_rev(
             elif _op == "rename":
                 new_path = operation[_op]["newPathname"]
                 if path not in flat_ops:
-                    # NULL terminator is needed for the special case
-                    # of a file being renamed to something else and
-                    # the old filename is reused
                     flat_ops[path + "\0"] = (_op, new_path, rev)
                 else:
                     new_op, _, _ = flat_ops.pop(path)
@@ -198,14 +191,11 @@ def create_single_rev(
                 "atV": rev,
             }
             revs.append(
-                create_single_binary_rev(
-                    browser, project_id, update, operation
-                )
+                create_single_binary_rev(browser, project_id, update, operation)
             )
 
     authors = update["meta"]["users"]
     if not authors:
-        # edge case of the sharelatex to overleaf migration
         authors = [
             {
                 "first_name": "Overleaf History System",
