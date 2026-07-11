@@ -122,8 +122,7 @@ def choose_indices(total: int) -> list[int]:
         print("Invalid selection; try again.")
 
 
-def main(argv=None) -> None:
-    args = parse_args(argv)
+def archive(args: argparse.Namespace) -> None:
     client = build_client(args)
 
     all_projects = get_project_list(client)
@@ -143,6 +142,18 @@ def main(argv=None) -> None:
         history = create_project_history(client, project)
         repo = create_repo(history, args.output_dir)
         print("\033[2K\rArchived {!r} -> {}".format(project.name, repo))
+
+
+def main(argv=None) -> None:
+    args = parse_args(argv)
+    try:
+        archive(args)
+    except KeyboardInterrupt:
+        raise SystemExit(
+            "\n\033[2K\rInterrupted. Rerun to resume from the cache in {}.".format(
+                args.cache_dir
+            )
+        ) from None
 
 
 if __name__ == "__main__":

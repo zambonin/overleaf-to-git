@@ -11,6 +11,7 @@ dependencies = [
     "requests>=2.25",
     "ratelimit>=2.2",
     "pygit2>=1.14",
+    "urllib3>=1.26",
 ]
 
 [project.optional-dependencies]

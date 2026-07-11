@@ -2,13 +2,16 @@
 # pylint: disable=C0209
 from __future__ import annotations
 
+from functools import wraps
 from json import dump, load, loads
 from operator import itemgetter
 from pathlib import Path
+from sys import stderr
+from time import monotonic, sleep
 from zipfile import ZipFile
 
 import requests
-from ratelimit import limits, sleep_and_retry, RateLimitException
+from ratelimit import limits, RateLimitException
 
 from .client import OverleafClient, find_meta_content
 from .custom_types import (
@@ -17,9 +20,20 @@ from .custom_types import (
     OverleafRawRevision,
 )
 
+NETWORK_ERRORS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+)
+GET_ATTEMPTS = 4
+GET_BACKOFF = 30
+GET_COOLDOWN = 600
+ZIP_TIMEOUT = 300
+ANNOUNCE_AFTER = 5.0
+
 
 def get_project_list(client: OverleafClient) -> list[OverleafRawProject]:
-    response = client.get("/project")
+    response = resilient_get(client, "/project", defer=False)
     raw_json = find_meta_content(response.text, "ol-prefetchedProjectsBlob")
     if raw_json is None:
         raise SystemExit(
@@ -36,15 +50,17 @@ def get_project_updates(
     path = "/project/{}/updates".format(project_id)
     history: list[OverleafProjectUpdate] = []
 
-    response = client.get(path, params={"min_count": count})
+    response = resilient_get(client, path, defer=False, params={"min_count": count})
     if response.status_code == 403:
         return history
 
     data = response.json()
     history += data["updates"]
     while "nextBeforeTimestamp" in data:
-        response = client.get(
+        response = resilient_get(
+            client,
             path,
+            defer=False,
             params={"min_count": count, "before": data["nextBeforeTimestamp"]},
         )
         data = response.json()
@@ -66,6 +82,61 @@ def _retry_after(response: requests.Response, default: int) -> int:
         return default
 
 
+def wait_visibly(seconds: float, reason: str) -> None:
+    if seconds < ANNOUNCE_AFTER:
+        sleep(max(seconds, 0.0))
+        return
+
+    deadline = monotonic() + seconds
+    remaining = seconds
+    while remaining > 0:
+        print(
+            "\033[2K\r{}; retrying in {:.0f}s (Ctrl-C to stop)".format(
+                reason, remaining
+            ),
+            end="",
+            file=stderr,
+            flush=True,
+        )
+        sleep(min(1.0, remaining))
+        remaining = deadline - monotonic()
+    print("\033[2K\r", end="", file=stderr, flush=True)
+
+
+def cooldown_and_retry(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except RateLimitException as exc:
+                wait_visibly(max(exc.period_remaining, 0.0), str(exc))
+
+    return wrapper
+
+
+def resilient_get(
+    client: OverleafClient, url: str, defer: bool = True, **kwargs
+) -> requests.Response:
+    delay = GET_BACKOFF
+    for attempt in range(1, GET_ATTEMPTS + 1):
+        try:
+            return client.get(url, **kwargs)
+        except NETWORK_ERRORS as exc:
+            if attempt == GET_ATTEMPTS:
+                if not defer:
+                    raise
+                raise RateLimitException(
+                    "network error: {}".format(exc), GET_COOLDOWN
+                ) from exc
+            wait_visibly(
+                delay,
+                "{}: {} (attempt {}/{})".format(url, exc, attempt, GET_ATTEMPTS),
+            )
+            delay *= 2
+    raise AssertionError("unreachable")
+
+
 def get_zip_package(client: OverleafClient, project_id: str, rev_id: int) -> ZipFile:
     full_path = project_cache_dir(client, project_id) / "{}.zip".format(rev_id)
     if not full_path.exists():
@@ -73,16 +144,13 @@ def get_zip_package(client: OverleafClient, project_id: str, rev_id: int) -> Zip
     return ZipFile(full_path, "r")
 
 
-@sleep_and_retry
-@limits(calls=1, period=60)
+@cooldown_and_retry
+@limits(calls=1, period=120)
 def get_zip_package_remote(
     client: OverleafClient, project_id: str, rev_id: int
 ) -> bytes:
     url = "/project/{}/version/{}/zip".format(project_id, rev_id)
-    try:
-        response = client.get(url)
-    except requests.exceptions.ConnectionError as exc:
-        raise RateLimitException("connection aborted", 600) from exc
+    response = resilient_get(client, url, timeout=ZIP_TIMEOUT)
 
     if response.status_code == 429:
         raise RateLimitException("HTTP 429", _retry_after(response, 300))
@@ -111,7 +179,7 @@ def get_single_diff(
         return load(handle)
 
 
-@sleep_and_retry
+@cooldown_and_retry
 @limits(calls=1, period=1)
 def get_single_diff_remote(
     client: OverleafClient,
@@ -121,8 +189,10 @@ def get_single_diff_remote(
     new_rev_id: int,
 ) -> OverleafRawRevision:
     url = "/project/{}/diff".format(project_id)
-    response = client.get(
-        url, params={"pathname": file_id, "from": old_rev_id, "to": new_rev_id}
+    response = resilient_get(
+        client,
+        url,
+        params={"pathname": file_id, "from": old_rev_id, "to": new_rev_id},
     )
     if response.status_code == 429:
         raise RateLimitException("HTTP 429", _retry_after(response, 60))

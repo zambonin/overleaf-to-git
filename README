@@ -64,7 +64,11 @@ anything is entitled to delete.
 Responsible use & caching
 -------------------------
 
-Requests are rate limited (diffs at 1/second, version ZIPs at 1/2 minutes).
+Requests are rate limited (diffs at 1/second, version ZIPs at 1/2 minutes) and
+the tool backs off when the server signals a limit (HTTP 429/500, `Retry-After`)
+or when the network fails, retrying with exponential backoff rather than losing
+a long import to one timeout. A wait longer than a few seconds is announced with
+a countdown, and Ctrl-C stops it cleanly.
 
 Every downloaded diff and ZIP is cached under `--cache-dir` (default
 `~/.cache/overleaf-to-git/<project-id>/`), so an interrupted archive resumes
