@@ -9,10 +9,17 @@ OverleafProjectUpdate = dict[str, int | OverleafProjectMeta | list[str]]
 OverleafRawRevision = dict[str, list[dict[str, str]]]
 
 
+class OverleafTag(NamedTuple):
+    uid: str
+    name: str
+    project_ids: frozenset[str]
+
+
 class OverleafProject(NamedTuple):
     uid: str
     name: str
     updates: list[OverleafProjectUpdate]
+    tags: tuple[str, ...] = ()
 
 
 class OverleafSingleRevision(NamedTuple):
@@ -34,3 +41,4 @@ class OverleafProjectWithHistory(NamedTuple):
     uid: str
     name: str
     updates: list[OverleafRevision]
+    tags: tuple[str, ...] = ()

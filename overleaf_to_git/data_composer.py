@@ -11,6 +11,7 @@ from .custom_types import (
     OverleafRawProject,
     OverleafRevision,
     OverleafSingleRevision,
+    OverleafTag,
 )
 from .overleaf_browser import (
     get_single_diff,
@@ -19,10 +20,41 @@ from .overleaf_browser import (
 )
 
 
-def display_projects(projects: list[OverleafRawProject]) -> str:
+def tags_for(tags: list[OverleafTag], project_id: str) -> tuple[str, ...]:
+    return tuple(tag.name for tag in tags if project_id in tag.project_ids)
+
+
+def match_tags(
+    projects: list[OverleafRawProject],
+    tags: list[OverleafTag],
+    wanted: list[str],
+) -> list[int]:
+    known = {tag.name.casefold(): tag for tag in tags}
+    missing = [name for name in wanted if name.casefold() not in known]
+    if missing:
+        raise SystemExit(
+            "Unknown tag(s): {}. Available: {}".format(
+                ", ".join(missing),
+                ", ".join(sorted(tag.name for tag in tags)) or "(none)",
+            )
+        )
+
+    chosen: set[str] = set()
+    for name in wanted:
+        chosen |= known[name.casefold()].project_ids
+    return [
+        index
+        for index, project in enumerate(projects, start=1)
+        if project["id"] in chosen
+    ]
+
+
+def display_projects(
+    projects: list[OverleafRawProject], tags: list[OverleafTag] | None = None
+) -> str:
     output = ""
-    line_fmt = "{:>4}  {:<34}  {:<22}  {:<10}\n"
-    output += line_fmt.format("", "Project name", "Owner", "Last update")
+    line_fmt = "{:>4}  {:<34}  {:<22}  {:<10}  {:<20}\n"
+    output += line_fmt.format("", "Project name", "Owner", "Last update", "Tags")
     total_projects = len(projects)
 
     for index, project in enumerate(reversed(projects)):
@@ -36,6 +68,11 @@ def display_projects(projects: list[OverleafRawProject]) -> str:
             shorten(project["name"], width=34, placeholder="..."),
             email,
             project["lastUpdated"][:10],
+            shorten(
+                ", ".join(tags_for(tags or [], project["id"])),
+                width=20,
+                placeholder="...",
+            ),
         )
 
     return output
@@ -65,6 +102,7 @@ def create_projects(
     client: OverleafClient,
     projects: list[OverleafRawProject],
     indices: list[int],
+    tags: list[OverleafTag] | None = None,
 ) -> list[OverleafProject]:
     fmt = "[{:>36}]  {:>4}/{:>4} revision list"
     total_projects = len(indices)
@@ -76,7 +114,12 @@ def create_projects(
         print(msg, end="\r")
 
         chosen_projects.append(
-            OverleafProject(_id, name, get_project_updates(client, _id))
+            OverleafProject(
+                _id,
+                name,
+                get_project_updates(client, _id),
+                tags_for(tags or [], _id),
+            )
         )
 
     return chosen_projects
@@ -94,7 +137,7 @@ def create_project_history(
         print(msg, end="\r")
         all_revs.append(create_single_rev(client, project.uid, update))
 
-    return OverleafProjectWithHistory(project.uid, project.name, all_revs)
+    return OverleafProjectWithHistory(project.uid, project.name, all_revs, project.tags)
 
 
 def create_single_text_rev(

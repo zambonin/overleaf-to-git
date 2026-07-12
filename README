@@ -47,18 +47,42 @@ Alternatives:
 Usage
 -----
 
-    # list projects (newest first) and their owners
+    # list projects (newest first), their owners and their dashboard tags
     uv run overleaf-to-git --list
 
     # archive projects 1 to 4 and 7, non-interactively
     uv run overleaf-to-git --projects "1-4 7"
 
-    # omit --projects to pick interactively from the printed list
+    # archive every project carrying a dashboard tag (repeatable)
+    uv run overleaf-to-git --tag '~published'
+
+    # ...and file the repositories under a directory per tag
+    uv run overleaf-to-git --tag '~published' --group-by-tag
+
+    # omit --projects and --tag to pick interactively from the printed list
 
 Each chosen project becomes a Git repository under --output-dir, which defaults
 to `~/.local/share/overleaf-to-git/` ($XDG_DATA_HOME). The repositories are the
 product, so they live in the data directory and never in the cache, which
 anything is entitled to delete.
+
+
+Re-running
+----------
+
+Repositories are named `<projectId>-<slug>` and found again by their id, so a
+re-run updates the repository it made last time instead of building a second
+one, and follows a project renamed on Overleaf.
+
+Imported commits are deterministic, so rebuilding an unchanged history
+reproduces its commit ids exactly and adds nothing. Signing in UTC keeps the
+importing machine's timezone out of those ids.
+
+Commits of your own on top of the imported history are never discarded: they are
+kept on a `local/<timestamp>` branch. Such a branch is deleted once a later
+import turns out to contain its commits anyway.
+An archive repository with uncommitted changes is rejected rather than reset;
+these repositories are otherwise machine-owned.
 
 
 Responsible use & caching

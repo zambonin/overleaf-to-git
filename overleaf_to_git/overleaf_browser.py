@@ -18,6 +18,7 @@ from .custom_types import (
     OverleafProjectUpdate,
     OverleafRawProject,
     OverleafRawRevision,
+    OverleafTag,
 )
 
 NETWORK_ERRORS = (
@@ -32,7 +33,9 @@ ZIP_TIMEOUT = 300
 ANNOUNCE_AFTER = 5.0
 
 
-def get_project_list(client: OverleafClient) -> list[OverleafRawProject]:
+def get_dashboard(
+    client: OverleafClient,
+) -> tuple[list[OverleafRawProject], list[OverleafTag]]:
     response = resilient_get(client, "/project", defer=False)
     raw_json = find_meta_content(response.text, "ol-prefetchedProjectsBlob")
     if raw_json is None:
@@ -41,7 +44,26 @@ def get_project_list(client: OverleafClient) -> list[OverleafRawProject]:
             "authenticated -- check --session / --from-browser and --base-url."
         )
     projects = loads(raw_json)["projects"]
-    return sorted(projects, key=itemgetter("lastUpdated"), reverse=True)
+    projects.sort(key=itemgetter("lastUpdated"), reverse=True)
+    return projects, parse_tags(find_meta_content(response.text, "ol-tags"))
+
+
+def parse_tags(raw_json: str | None) -> list[OverleafTag]:
+    if not raw_json:
+        return []
+    return [
+        OverleafTag(
+            uid=tag.get("_id", ""),
+            name=tag.get("name", ""),
+            project_ids=frozenset(tag.get("project_ids", ())),
+        )
+        for tag in loads(raw_json)
+        if tag.get("name")
+    ]
+
+
+def get_project_list(client: OverleafClient) -> list[OverleafRawProject]:
+    return get_dashboard(client)[0]
 
 
 def get_project_updates(

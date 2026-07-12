@@ -17,9 +17,10 @@ from .data_composer import (
     create_projects,
     create_sequences,
     display_projects,
+    match_tags,
 )
 from .git_operations import create_repo
-from .overleaf_browser import get_project_list
+from .overleaf_browser import get_dashboard
 
 DEFAULT_CACHE_DIR = (
     Path(environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "overleaf-to-git"
@@ -70,10 +71,25 @@ def parse_args(argv=None) -> argparse.Namespace:
         help='non-interactive selection, e.g. "1-4 7"; omit to choose interactively.',
     )
     parser.add_argument(
+        "--tag",
+        metavar="NAME",
+        action="append",
+        dest="tags",
+        default=None,
+        help="archive every project carrying this dashboard tag; repeatable, "
+        "and unioned with --projects.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
         help="directory to create the Git repositories in (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--group-by-tag",
+        action="store_true",
+        help="write repositories into output-dir/<tag>/; a project with "
+        "several tags lands under the first one.",
     )
     parser.add_argument(
         "--cache-dir",
@@ -122,25 +138,37 @@ def choose_indices(total: int) -> list[int]:
         print("Invalid selection; try again.")
 
 
-def archive(args: argparse.Namespace) -> None:
-    client = build_client(args)
-
-    all_projects = get_project_list(client)
-    print(display_projects(all_projects), end="")
-    if args.list or not all_projects:
-        return
-
+def select_indices(args: argparse.Namespace, all_projects, all_tags) -> list[int]:
+    chosen: set[int] = set()
+    if args.tags:
+        chosen |= set(match_tags(all_projects, all_tags, args.tags))
     if args.projects is not None:
         indices = create_sequences(args.projects)
         if not indices or any(num > len(all_projects) for num in indices):
             raise SystemExit("Invalid --projects selection.")
-    else:
-        indices = choose_indices(len(all_projects))
+        chosen |= set(indices)
 
-    projects = create_projects(client, all_projects, indices)
+    if args.tags and not chosen:
+        raise SystemExit("No projects carry the requested tag(s).")
+    if chosen:
+        return sorted(chosen)
+    return choose_indices(len(all_projects))
+
+
+def archive(args: argparse.Namespace) -> None:
+    client = build_client(args)
+
+    all_projects, all_tags = get_dashboard(client)
+    print(display_projects(all_projects, all_tags), end="")
+    if args.list or not all_projects:
+        return
+
+    indices = select_indices(args, all_projects, all_tags)
+
+    projects = create_projects(client, all_projects, indices, all_tags)
     for project in projects:
         history = create_project_history(client, project)
-        repo = create_repo(history, args.output_dir)
+        repo = create_repo(history, args.output_dir, args.group_by_tag)
         print("\033[2K\rArchived {!r} -> {}".format(project.name, repo))
 
 

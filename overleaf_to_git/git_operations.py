@@ -2,6 +2,7 @@
 # pylint: disable=C0209
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from textwrap import shorten
 
@@ -67,8 +68,11 @@ def _index_rename(index: pygit2.Index, old: str, new: str) -> None:
 
 
 def do_commit(
-    repo: pygit2.Repository, index: pygit2.Index, update: OverleafRevision
-) -> None:
+    repo: pygit2.Repository,
+    index: pygit2.Index,
+    update: OverleafRevision,
+    parent: pygit2.Oid | None,
+) -> pygit2.Oid:
     for rev in update.file_revs:
         if rev.operation == "remove":
             _index_remove(index, rev.file_id)
@@ -83,13 +87,52 @@ def do_commit(
             blob = repo.create_blob(data)
             index.add(pygit2.IndexEntry(rev.file_id, blob, _FILEMODE_BLOB))
 
-    index.write()
-    tree = index.write_tree()
+    tree = index.write_tree(repo)
     author = _signature(update.authors[0], update.before_ts)
     committer = _signature(update.authors[0], update.after_ts)
     message = parse_message(update.authors, update.file_revs)
-    parents = [] if repo.head_is_unborn else [repo.head.target]
-    repo.create_commit("HEAD", author, committer, message, tree, parents)
+    parents = [] if parent is None else [parent]
+    return repo.create_commit(None, author, committer, message, tree, parents)
+
+
+def find_existing_repo(output_dir: Path, project_id: str) -> Path | None:
+    for pattern in ("{}-*", "*/{}-*"):
+        for path in sorted(output_dir.glob(pattern.format(project_id))):
+            if (path / ".git").exists():
+                return path
+    return None
+
+
+def preserve_local_work(repo: pygit2.Repository, tip: pygit2.Oid) -> str | None:
+    if repo.head_is_unborn:
+        return None
+    head = repo.head.target
+    if head == tip or repo.descendant_of(tip, head):
+        return None
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    name, suffix = "local/{}".format(stamp), 1
+    while name in repo.branches.local:
+        suffix += 1
+        name = "local/{}-{}".format(stamp, suffix)
+    repo.branches.local.create(name, repo.head.peel(pygit2.Commit))
+    return name
+
+
+def prune_subsumed(repo: pygit2.Repository, tip: pygit2.Oid) -> int:
+    pruned = 0
+    for name in [b for b in repo.branches.local if b.startswith("local/")]:
+        branch = repo.branches.local[name]
+        if branch.target == tip or repo.descendant_of(tip, branch.target):
+            branch.delete()
+            pruned += 1
+    return pruned
+
+
+def _branch_ref(repo: pygit2.Repository) -> str:
+    if repo.head_is_unborn:
+        return repo.references["HEAD"].target
+    return repo.head.name
 
 
 def _sanitize(name: str) -> str:
@@ -99,28 +142,70 @@ def _sanitize(name: str) -> str:
     return cleaned.strip("-_. ") or "overleaf-project"
 
 
-def _unique_path(output_dir: Path, name: str) -> Path:
-    candidate, suffix = output_dir / name, 1
-    while candidate.exists():
-        suffix += 1
-        candidate = output_dir / "{}-{}".format(name, suffix)
-    return candidate
+def _target_path(
+    project: OverleafProjectWithHistory, output_dir: Path, group_by_tag: bool
+) -> Path:
+    if group_by_tag and project.tags:
+        output_dir /= _sanitize(project.tags[0])
+    return output_dir / "{}-{}".format(project.uid, _sanitize(project.name))
 
 
-def create_repo(project: OverleafProjectWithHistory, output_dir: Path) -> Path:
+def _relocate(existing: Path, target: Path) -> Path:
+    if existing == target:
+        return existing
+    if target.exists():
+        print(
+            "\033[2K\rNot renaming {} -> {}: the target already exists".format(
+                existing, target
+            )
+        )
+        return existing
+    target.parent.mkdir(parents=True, exist_ok=True)
+    existing.rename(target)
+    print("\033[2K\rRenamed {} -> {}".format(existing, target))
+    return target
+
+
+def create_repo(
+    project: OverleafProjectWithHistory,
+    output_dir: Path,
+    group_by_tag: bool = False,
+) -> Path:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    repo_path = _unique_path(output_dir, _sanitize(project.name))
-    repo = pygit2.init_repository(str(repo_path))
-    index = repo.index
+    target = _target_path(project, output_dir, group_by_tag)
 
+    existing = find_existing_repo(output_dir, project.uid)
+    if existing is None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        repo_path = target
+        repo = pygit2.init_repository(str(repo_path))
+    else:
+        repo = pygit2.Repository(str(existing))
+        if repo.status():
+            raise SystemExit(
+                "Refusing to archive into a repository with uncommitted "
+                "changes: " + str(existing)
+            )
+        repo_path = _relocate(existing, target)
+        repo = pygit2.Repository(str(repo_path))
+
+    index = pygit2.Index()
+    tip: pygit2.Oid | None = None
     fmt = "[{:>32}]  {:>4}/{:>4} commits"
     total_commits = len(project.updates)
     for index_i, update in enumerate(project.updates):
         msg = fmt.format(shorten(project.name, width=32), index_i + 1, total_commits)
         print(msg, end="\r")
-        do_commit(repo, index, update)
+        tip = do_commit(repo, index, update, tip)
 
-    if not repo.head_is_unborn:
-        repo.reset(repo.head.target, pygit2.GIT_RESET_HARD)
+    if tip is not None:
+        parked = preserve_local_work(repo, tip)
+        prune_subsumed(repo, tip)
+        if parked:
+            print("\033[2K\rKept local commits on {!r} in {}".format(parked, repo_path))
+        branch = _branch_ref(repo)
+        repo.references.create(branch, tip, force=True)
+        repo.set_head(branch)
+        repo.reset(tip, pygit2.GIT_RESET_HARD)
     return repo_path
