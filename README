@@ -72,7 +72,8 @@ Re-running
 
 Repositories are named `<projectId>-<slug>` and found again by their id, so a
 re-run updates the repository it made last time instead of building a second
-one, and follows a project renamed on Overleaf.
+one, and follows a project renamed on Overleaf. Only the projects that actually
+changed are reported when a run finishes.
 
 Imported commits are deterministic, so rebuilding an unchanged history
 reproduces its commit ids exactly and adds nothing. Signing in UTC keeps the
@@ -96,8 +97,9 @@ a countdown, and Ctrl-C stops it cleanly.
 
 Every downloaded diff and ZIP is cached under `--cache-dir` (default
 `~/.cache/overleaf-to-git/<project-id>/`), so an interrupted archive resumes
-without touching Overleaf's servers again for anything it already fetched. Keep
-the cache around until you are done.
+without touching Overleaf's servers again for anything it already fetched.
+Projects are fetched and archived one at a time, so an interrupted run keeps the
+projects it had already finished. Keep the cache around until you are done.
 
 Binary files are reconstructed from version ZIPs, downloading the minimal set of
 ZIPs by normalizing add/rename/remove sequences first.

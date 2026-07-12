@@ -12,15 +12,17 @@ from .client import (
     DEFAULT_USER_AGENT,
     OverleafClient,
 )
+from .custom_types import ArchiveResult
 from .data_composer import (
+    create_project,
     create_project_history,
-    create_projects,
     create_sequences,
     display_projects,
     match_tags,
 )
 from .git_operations import create_repo
 from .overleaf_browser import get_dashboard
+from .progress import STATUS, Progress
 
 DEFAULT_CACHE_DIR = (
     Path(environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "overleaf-to-git"
@@ -155,21 +157,69 @@ def select_indices(args: argparse.Namespace, all_projects, all_tags) -> list[int
     return choose_indices(len(all_projects))
 
 
+def shell_path(path: Path) -> str:
+    for name in ("XDG_DATA_HOME", "HOME"):
+        root = environ.get(name)
+        if not root:
+            continue
+        try:
+            return "${}/{}".format(name, path.relative_to(root))
+        except ValueError:
+            continue
+    return str(path)
+
+
+def summarize(results: list[tuple[str, ArchiveResult]]) -> None:
+    changed = [res for _, res in results if res.changed]
+    print(
+        "{} project{}, {} updated{}".format(
+            len(results),
+            "" if len(results) == 1 else "s",
+            len(changed) or "none",
+            ":" if changed else "",
+        )
+    )
+    for res in changed:
+        notes = []
+        if res.added:
+            notes.append(
+                "+{} commit{}".format(res.added, "" if res.added == 1 else "s")
+            )
+        if res.renamed_from:
+            notes.append("renamed from {}".format(res.renamed_from))
+        if res.parked:
+            notes.append("kept local commits on {!r}".format(res.parked))
+        print("  {}".format(shell_path(res.path)))
+        print("    {}".format(", ".join(notes)))
+
+
 def archive(args: argparse.Namespace) -> None:
     client = build_client(args)
 
     all_projects, all_tags = get_dashboard(client)
-    print(display_projects(all_projects, all_tags), end="")
+    picking = args.projects is None and not args.tags
+    if args.list or picking:
+        print(display_projects(all_projects, all_tags), end="")
     if args.list or not all_projects:
         return
 
     indices = select_indices(args, all_projects, all_tags)
+    chosen = [all_projects[index - 1] for index in indices]
+    progress = Progress(len(chosen))
+    results: list[tuple[str, ArchiveResult]] = []
 
-    projects = create_projects(client, all_projects, indices, all_tags)
-    for project in projects:
-        history = create_project_history(client, project)
-        repo = create_repo(history, args.output_dir, args.group_by_tag)
-        print("\033[2K\rArchived {!r} -> {}".format(project.name, repo))
+    for position, raw_project in enumerate(chosen, start=1):
+        progress.project(position, raw_project["name"])
+        project = create_project(client, raw_project, all_tags, progress)
+        history = create_project_history(client, project, progress)
+        result = create_repo(history, args.output_dir, args.group_by_tag, progress)
+        results.append((project.name, result))
+        if not STATUS.interactive:
+            STATUS.result("Archived {!r} -> {}".format(project.name, result.path))
+
+    progress.done()
+    if STATUS.interactive:
+        summarize(results)
 
 
 def main(argv=None) -> None:

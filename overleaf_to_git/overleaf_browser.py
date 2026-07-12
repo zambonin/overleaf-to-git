@@ -6,7 +6,6 @@ from functools import wraps
 from json import dump, load, loads
 from operator import itemgetter
 from pathlib import Path
-from sys import stderr
 from time import monotonic, sleep
 from zipfile import ZipFile
 
@@ -20,6 +19,7 @@ from .custom_types import (
     OverleafRawRevision,
     OverleafTag,
 )
+from .progress import STATUS
 
 NETWORK_ERRORS = (
     requests.exceptions.Timeout,
@@ -109,20 +109,16 @@ def wait_visibly(seconds: float, reason: str) -> None:
         sleep(max(seconds, 0.0))
         return
 
+    STATUS.note("{}; waiting {:.0f}s".format(reason, seconds))
     deadline = monotonic() + seconds
     remaining = seconds
     while remaining > 0:
-        print(
-            "\033[2K\r{}; retrying in {:.0f}s (Ctrl-C to stop)".format(
-                reason, remaining
-            ),
-            end="",
-            file=stderr,
-            flush=True,
+        STATUS.update(
+            "{}; retrying in {:.0f}s (Ctrl-C to stop)".format(reason, remaining)
         )
         sleep(min(1.0, remaining))
         remaining = deadline - monotonic()
-    print("\033[2K\r", end="", file=stderr, flush=True)
+    STATUS.clear()
 
 
 def cooldown_and_retry(func):

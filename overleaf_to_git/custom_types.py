@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from pathlib import Path
 from typing import NamedTuple
 
 OverleafAuthor = dict[str, str]
@@ -42,3 +43,14 @@ class OverleafProjectWithHistory(NamedTuple):
     name: str
     updates: list[OverleafRevision]
     tags: tuple[str, ...] = ()
+
+
+class ArchiveResult(NamedTuple):
+    path: Path
+    added: int = 0
+    parked: str | None = None
+    renamed_from: str | None = None
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.added or self.parked or self.renamed_from)

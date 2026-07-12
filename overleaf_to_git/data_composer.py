@@ -18,6 +18,7 @@ from .overleaf_browser import (
     get_project_updates,
     get_zip_package,
 )
+from .progress import Progress
 
 
 def tags_for(tags: list[OverleafTag], project_id: str) -> tuple[str, ...]:
@@ -98,43 +99,34 @@ def create_sequences(string: str) -> list[int]:
     return sorted(sequence)
 
 
-def create_projects(
+def create_project(
     client: OverleafClient,
-    projects: list[OverleafRawProject],
-    indices: list[int],
+    raw_project: OverleafRawProject,
     tags: list[OverleafTag] | None = None,
-) -> list[OverleafProject]:
-    fmt = "[{:>36}]  {:>4}/{:>4} revision list"
-    total_projects = len(indices)
-    chosen_projects = []
-
-    for list_ind, index in enumerate(indices):
-        _id, name = projects[index - 1]["id"], projects[index - 1]["name"]
-        msg = fmt.format(shorten(name, width=32), list_ind + 1, total_projects)
-        print(msg, end="\r")
-
-        chosen_projects.append(
-            OverleafProject(
-                _id,
-                name,
-                get_project_updates(client, _id),
-                tags_for(tags or [], _id),
-            )
-        )
-
-    return chosen_projects
+    progress: Progress | None = None,
+) -> OverleafProject:
+    _id, name = raw_project["id"], raw_project["name"]
+    if progress:
+        progress.step("revisions")
+    return OverleafProject(
+        _id,
+        name,
+        get_project_updates(client, _id),
+        tags_for(tags or [], _id),
+    )
 
 
 def create_project_history(
-    client: OverleafClient, project: OverleafProject
+    client: OverleafClient,
+    project: OverleafProject,
+    progress: Progress | None = None,
 ) -> OverleafProjectWithHistory:
-    fmt = "[{:>36}]  {:>4}/{:>4} individual revisions"
     changes = len(project.updates)
     all_revs = []
 
     for index, update in enumerate(reversed(project.updates)):
-        msg = fmt.format(shorten(project.name, width=32), index + 1, changes)
-        print(msg, end="\r")
+        if progress:
+            progress.step("fetching", index + 1, changes)
         all_revs.append(create_single_rev(client, project.uid, update))
 
     return OverleafProjectWithHistory(project.uid, project.name, all_revs, project.tags)

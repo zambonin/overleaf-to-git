@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from textwrap import shorten
 
 import pygit2
 
 from .custom_types import (
+    ArchiveResult,
     OverleafAuthor,
     OverleafProjectWithHistory,
     OverleafRevision,
 )
+from .progress import STATUS, Progress
 
 _FILEMODE_BLOB = 0o100644
 
@@ -154,27 +155,38 @@ def _relocate(existing: Path, target: Path) -> Path:
     if existing == target:
         return existing
     if target.exists():
-        print(
-            "\033[2K\rNot renaming {} -> {}: the target already exists".format(
-                existing, target
+        STATUS.note(
+            "Not renaming {} -> {}: the target already exists".format(
+                existing.name, target.name
             )
         )
         return existing
     target.parent.mkdir(parents=True, exist_ok=True)
     existing.rename(target)
-    print("\033[2K\rRenamed {} -> {}".format(existing, target))
+    STATUS.note("Renamed {} -> {}".format(existing.name, target.name))
     return target
+
+
+def _count_new(
+    repo: pygit2.Repository, tip: pygit2.Oid, head: pygit2.Oid | None
+) -> int:
+    walker = repo.walk(tip)
+    if head is not None and head in repo:
+        walker.hide(head)
+    return sum(1 for _ in walker)
 
 
 def create_repo(
     project: OverleafProjectWithHistory,
     output_dir: Path,
     group_by_tag: bool = False,
-) -> Path:
+    progress: Progress | None = None,
+) -> ArchiveResult:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     target = _target_path(project, output_dir, group_by_tag)
 
+    renamed_from = None
     existing = find_existing_repo(output_dir, project.uid)
     if existing is None:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -188,24 +200,28 @@ def create_repo(
                 "changes: " + str(existing)
             )
         repo_path = _relocate(existing, target)
+        if repo_path != existing:
+            renamed_from = existing.name
         repo = pygit2.Repository(str(repo_path))
+
+    head = None if repo.head_is_unborn else repo.head.target
 
     index = pygit2.Index()
     tip: pygit2.Oid | None = None
-    fmt = "[{:>32}]  {:>4}/{:>4} commits"
     total_commits = len(project.updates)
     for index_i, update in enumerate(project.updates):
-        msg = fmt.format(shorten(project.name, width=32), index_i + 1, total_commits)
-        print(msg, end="\r")
+        if progress:
+            progress.step("building", index_i + 1, total_commits)
         tip = do_commit(repo, index, update, tip)
 
-    if tip is not None:
-        parked = preserve_local_work(repo, tip)
-        prune_subsumed(repo, tip)
-        if parked:
-            print("\033[2K\rKept local commits on {!r} in {}".format(parked, repo_path))
-        branch = _branch_ref(repo)
-        repo.references.create(branch, tip, force=True)
-        repo.set_head(branch)
-        repo.reset(tip, pygit2.GIT_RESET_HARD)
-    return repo_path
+    if tip is None:
+        return ArchiveResult(repo_path, renamed_from=renamed_from)
+
+    parked = preserve_local_work(repo, tip)
+    prune_subsumed(repo, tip)
+    added = _count_new(repo, tip, head)
+    branch = _branch_ref(repo)
+    repo.references.create(branch, tip, force=True)
+    repo.set_head(branch)
+    repo.reset(tip, pygit2.GIT_RESET_HARD)
+    return ArchiveResult(repo_path, added, parked, renamed_from)
