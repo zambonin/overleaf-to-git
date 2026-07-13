@@ -9,6 +9,8 @@ from pathlib import Path
 from .client import (
     DEFAULT_BASE_URL,
     DEFAULT_COOKIE_NAME,
+    DEFAULT_RETRIES,
+    DEFAULT_TIMEOUT,
     DEFAULT_USER_AGENT,
     OverleafClient,
 )
@@ -105,6 +107,22 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="HTTP User-Agent header.",
     )
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT,
+        metavar="SECONDS",
+        help="per-request timeout (default: %(default)s). ZIP downloads get "
+        "longer, since Overleaf assembles them before sending a byte.",
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=DEFAULT_RETRIES,
+        metavar="N",
+        help="transport-level retries for timeouts, resets and gateway "
+        "errors, with exponential backoff (default: %(default)s).",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="list available projects and exit.",
@@ -114,7 +132,11 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def build_client(args: argparse.Namespace) -> OverleafClient:
     client = OverleafClient(
-        args.base_url, cache_dir=args.cache_dir, user_agent=args.user_agent
+        args.base_url,
+        cache_dir=args.cache_dir,
+        user_agent=args.user_agent,
+        timeout=args.timeout,
+        retries=args.retries,
     )
     if args.from_browser:
         client.load_browser_cookies(args.from_browser)

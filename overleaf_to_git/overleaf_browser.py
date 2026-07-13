@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import wraps
 from json import dump, load, loads
 from operator import itemgetter
+from os import environ
 from pathlib import Path
 from time import monotonic, sleep
 from zipfile import ZipFile
@@ -30,6 +31,7 @@ GET_ATTEMPTS = 4
 GET_BACKOFF = 30
 GET_COOLDOWN = 600
 ZIP_TIMEOUT = 300
+ZIP_PERIOD = int(environ.get("OVERLEAF_ZIP_PERIOD", 120))
 ANNOUNCE_AFTER = 5.0
 
 
@@ -163,7 +165,7 @@ def get_zip_package(client: OverleafClient, project_id: str, rev_id: int) -> Zip
 
 
 @cooldown_and_retry
-@limits(calls=1, period=120)
+@limits(calls=1, period=ZIP_PERIOD)
 def get_zip_package_remote(
     client: OverleafClient, project_id: str, rev_id: int
 ) -> bytes:

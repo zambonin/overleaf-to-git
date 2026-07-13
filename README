@@ -95,6 +95,10 @@ or when the network fails, retrying with exponential backoff rather than losing
 a long import to one timeout. A wait longer than a few seconds is announced with
 a countdown, and Ctrl-C stops it cleanly.
 
+The budgets are tunable, since the useful value depends on the instance and the
+network: `--timeout` and `--retries` as flags, and the ZIP quota as
+`OVERLEAF_ZIP_PERIOD` (seconds per ZIP; it is read before the flags exist).
+
 Every downloaded diff and ZIP is cached under `--cache-dir` (default
 `~/.cache/overleaf-to-git/<project-id>/`), so an interrupted archive resumes
 without touching Overleaf's servers again for anything it already fetched.
