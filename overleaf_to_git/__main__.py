@@ -75,6 +75,14 @@ def parse_args(argv=None) -> argparse.Namespace:
         help='non-interactive selection, e.g. "1-4 7"; omit to choose interactively.',
     )
     parser.add_argument(
+        "--project-id",
+        action="append",
+        dest="project_ids",
+        default=None,
+        metavar="ID",
+        help="archive the project with this stable Overleaf id; repeatable",
+    )
+    parser.add_argument(
         "--tag",
         metavar="NAME",
         action="append",
@@ -164,6 +172,17 @@ def choose_indices(total: int) -> list[int]:
 
 def select_indices(args: argparse.Namespace, all_projects, all_tags) -> list[int]:
     chosen: set[int] = set()
+    if args.project_ids:
+        wanted = set(args.project_ids)
+        by_id = {
+            project["id"]: index for index, project in enumerate(all_projects, start=1)
+        }
+        missing = sorted(wanted - set(by_id))
+        if missing:
+            raise SystemExit(
+                "Unknown Overleaf project id(s): {}".format(", ".join(missing))
+            )
+        chosen |= {by_id[project_id] for project_id in wanted}
     if args.tags:
         chosen |= set(match_tags(all_projects, all_tags, args.tags))
     if args.projects is not None:
@@ -219,7 +238,7 @@ def archive(args: argparse.Namespace) -> None:
     client = build_client(args)
 
     all_projects, all_tags = get_dashboard(client)
-    picking = args.projects is None and not args.tags
+    picking = args.projects is None and not args.tags and not args.project_ids
     if args.list or picking:
         print(display_projects(all_projects, all_tags), end="")
     if args.list or not all_projects:

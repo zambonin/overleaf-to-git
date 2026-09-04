@@ -53,6 +53,9 @@ Usage
     # archive projects 1 to 4 and 7, non-interactively
     uv run overleaf-to-git --projects "1-4 7"
 
+    # archive exact projects reproducibly (repeat for several projects)
+    uv run overleaf-to-git --project-id 59d3b117fea3c15129b60c74
+
     # archive every project carrying a dashboard tag (repeatable)
     uv run overleaf-to-git --tag '~published'
 
@@ -102,6 +105,8 @@ network: `--timeout` and `--retries` as flags, and the ZIP quota as
 Every downloaded diff and ZIP is cached under `--cache-dir` (default
 `~/.cache/overleaf-to-git/<project-id>/`), so an interrupted archive resumes
 without touching Overleaf's servers again for anything it already fetched.
+Cache entries are validated and installed atomically; an interrupted write is
+never mistaken for a completed download.
 Projects are fetched and archived one at a time, so an interrupted run keeps the
 projects it had already finished. Keep the cache around until you are done.
 

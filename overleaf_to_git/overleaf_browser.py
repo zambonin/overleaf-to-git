@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from functools import wraps
-from json import dump, load, loads
+from json import dumps, load, loads
 from operator import itemgetter
 from os import environ
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from time import monotonic, sleep
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 import requests
 from ratelimit import limits, RateLimitException
@@ -76,7 +77,11 @@ def get_project_updates(
 
     response = resilient_get(client, path, defer=False, params={"min_count": count})
     if response.status_code == 403:
-        return history
+        raise SystemExit(
+            "Overleaf denied access to history for project {} (HTTP 403)".format(
+                project_id
+            )
+        )
 
     data = response.json()
     history += data["updates"]
@@ -160,7 +165,18 @@ def resilient_get(
 def get_zip_package(client: OverleafClient, project_id: str, rev_id: int) -> ZipFile:
     full_path = project_cache_dir(client, project_id) / "{}.zip".format(rev_id)
     if not full_path.exists():
-        full_path.write_bytes(get_zip_package_remote(client, project_id, rev_id))
+        data = get_zip_package_remote(client, project_id, rev_id)
+        with NamedTemporaryFile(dir=full_path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(data)
+        try:
+            with ZipFile(temporary, "r") as archive:
+                bad_member = archive.testzip()
+                if bad_member is not None:
+                    raise BadZipFile("CRC failure in " + bad_member)
+            temporary.replace(full_path)
+        finally:
+            temporary.unlink(missing_ok=True)
     return ZipFile(full_path, "r")
 
 
@@ -193,8 +209,16 @@ def get_single_diff(
         data = get_single_diff_remote(
             client, project_id, file_id, old_rev_id, new_rev_id
         )
-        with open(full_path, "w", encoding="utf8") as handle:
-            dump(data, handle, ensure_ascii=False)
+        encoded = dumps(data, ensure_ascii=False).encode("utf8")
+        with NamedTemporaryFile(dir=full_path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(encoded)
+        try:
+            with temporary.open(encoding="utf8") as handle:
+                load(handle)
+            temporary.replace(full_path)
+        finally:
+            temporary.unlink(missing_ok=True)
     with open(full_path, "r", encoding="utf8") as handle:
         return load(handle)
 
