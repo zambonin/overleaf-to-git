@@ -56,16 +56,14 @@ def display_projects(
     output = ""
     line_fmt = "{:>4}  {:<34}  {:<22}  {:<10}  {:<20}\n"
     output += line_fmt.format("", "Project name", "Owner", "Last update", "Tags")
-    total_projects = len(projects)
-
-    for index, project in enumerate(reversed(projects)):
+    for index, project in enumerate(projects, start=1):
         if not project.get("lastUpdatedBy", 1):
             email = "[!]"
         else:
             email = project["owner"]["email"]
             email = (email[:18] + "...") if len(email) > 20 else email
         output += line_fmt.format(
-            total_projects - index,
+            index,
             shorten(project["name"], width=34, placeholder="..."),
             email,
             project["lastUpdated"][:10],

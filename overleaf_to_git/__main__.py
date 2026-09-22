@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from math import isfinite
 from os import environ
 from pathlib import Path
+
+import requests
 
 from .client import (
     DEFAULT_BASE_URL,
@@ -33,6 +36,26 @@ DEFAULT_OUTPUT_DIR = (
     Path(environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     / "overleaf-to-git"
 )
+
+
+def positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return parsed
+
+
+def nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
+    return parsed
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -116,7 +139,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--timeout",
-        type=float,
+        type=positive_float,
         default=DEFAULT_TIMEOUT,
         metavar="SECONDS",
         help="per-request timeout (default: %(default)s). ZIP downloads get "
@@ -124,7 +147,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--retries",
-        type=int,
+        type=nonnegative_int,
         default=DEFAULT_RETRIES,
         metavar="N",
         help="transport-level retries for timeouts, resets and gateway "
@@ -267,6 +290,8 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     try:
         archive(args)
+    except requests.RequestException as exc:
+        raise SystemExit("Overleaf request failed: {}".format(exc)) from None
     except KeyboardInterrupt:
         raise SystemExit(
             "\n\033[2K\rInterrupted. Rerun to resume from the cache in {}.".format(

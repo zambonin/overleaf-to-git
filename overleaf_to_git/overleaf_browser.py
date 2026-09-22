@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
+from hashlib import sha256
 from json import dumps, load, loads
 from operator import itemgetter
 from os import environ
@@ -36,10 +37,22 @@ ZIP_PERIOD = int(environ.get("OVERLEAF_ZIP_PERIOD", 120))
 ANNOUNCE_AFTER = 5.0
 
 
+def require_success(response: requests.Response, context: str) -> None:
+    if not 200 <= response.status_code < 400:
+        raise SystemExit("{} failed (HTTP {})".format(context, response.status_code))
+
+
 def get_dashboard(
     client: OverleafClient,
 ) -> tuple[list[OverleafRawProject], list[OverleafTag]]:
     response = resilient_get(client, "/project", defer=False)
+    if response.status_code in (401, 403):
+        raise SystemExit(
+            "Could not read the project list (HTTP {}). The session is "
+            "probably not authenticated -- check --session / --from-browser "
+            "and --base-url.".format(response.status_code)
+        )
+    require_success(response, "Reading the project list")
     raw_json = find_meta_content(response.text, "ol-prefetchedProjectsBlob")
     if raw_json is None:
         raise SystemExit(
@@ -82,6 +95,7 @@ def get_project_updates(
                 project_id
             )
         )
+    require_success(response, "Reading history for project " + project_id)
 
     data = response.json()
     history += data["updates"]
@@ -92,6 +106,7 @@ def get_project_updates(
             defer=False,
             params={"min_count": count, "before": data["nextBeforeTimestamp"]},
         )
+        require_success(response, "Reading history for project " + project_id)
         data = response.json()
         history += data["updates"]
 
@@ -190,6 +205,9 @@ def get_zip_package_remote(
 
     if response.status_code == 429:
         raise RateLimitException("HTTP 429", _retry_after(response, 300))
+    if response.status_code == 500:
+        raise RateLimitException("ZIP rate limit reached", 300)
+    require_success(response, "Downloading project ZIP")
     data = response.content
     if data.startswith(b"Rate limit reached"):
         raise RateLimitException("ZIP rate limit reached", 300)
@@ -203,7 +221,11 @@ def get_single_diff(
     old_rev_id: int,
     new_rev_id: int,
 ) -> OverleafRawRevision:
-    cached = "{}_{}_{}.json".format(file_id.replace("/", "-"), old_rev_id, new_rev_id)
+    # Replacing slashes with dashes is not injective (``a/b`` and ``a-b``
+    # become the same name), which can silently apply one file's cached diff
+    # to another file. Keep the revision pair readable and hash the exact path.
+    path_key = sha256(file_id.encode("utf8")).hexdigest()
+    cached = "{}_{}_{}.json".format(path_key, old_rev_id, new_rev_id)
     full_path = project_cache_dir(client, project_id) / cached
     if not full_path.exists():
         data = get_single_diff_remote(
@@ -242,4 +264,5 @@ def get_single_diff_remote(
         raise RateLimitException("HTTP 429", _retry_after(response, 60))
     if response.status_code == 500:
         raise RateLimitException("diff rate limit reached", 60)
+    require_success(response, "Downloading file diff")
     return response.json()

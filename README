@@ -15,8 +15,11 @@ own server.
 Install
 -------
 
-The project is managed with `uv` (https://docs.astral.sh/uv/):
+The project requires Python 3.10 or newer and is managed with `uv`
+(https://docs.astral.sh/uv/):
 
+    git clone https://github.com/zambonin/overleaf-to-git.git
+    cd overleaf-to-git
     uv sync                      # core install
     uv sync --extra browser      # also enable --from-browser cookie import
 

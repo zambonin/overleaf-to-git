@@ -189,6 +189,11 @@ def create_repo(
     renamed_from = None
     existing = find_existing_repo(output_dir, project.uid)
     if existing is None:
+        if target.exists():
+            raise SystemExit(
+                "Refusing to replace an existing path that is not a known "
+                "archive repository: " + str(target)
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         repo_path = target
         repo = pygit2.init_repository(str(repo_path))
