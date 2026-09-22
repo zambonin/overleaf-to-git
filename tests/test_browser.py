@@ -43,6 +43,19 @@ class DashboardTests(TestCase):
         self.assertEqual(parse_tags(None), [])
         self.assertEqual(parse_tags('[{"_id": "tag"}]'), [])
 
+    def test_missing_project_metadata_reports_an_invalid_session(self):
+        client = SimpleNamespace(
+            get=lambda *args, **kwargs: SimpleNamespace(
+                status_code=200,
+                text="<html><title>Log in</title></html>",
+            )
+        )
+
+        with self.assertRaisesRegex(
+            SystemExit, "session is probably not authenticated"
+        ):
+            get_dashboard(client)
+
     def test_history_pagination_preserves_update_order(self):
         responses = [
             SimpleNamespace(
